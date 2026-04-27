@@ -7,7 +7,6 @@ env/
 venv/
 .venv/
 .env
-.env.prod
 .git
 .gitignore
 .vscode

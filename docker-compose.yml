@@ -12,7 +12,7 @@ services:
     environment:
       - REDIS__HOST=redis
       - REDIS__PORT=6379
-      - REDIS__PASSWORD=123qwe
+      - REDIS__PASSWORD=${REDIS__PASSWORD:-dingbridge_redis_password}
 
   redis:
     image: redis:7-alpine
@@ -20,8 +20,7 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    # 如果生产环境需要密码，请修改启动命令并同步更新 app 的环境变量
-    command: redis-server --requirepass 123qwe
+    command: redis-server --requirepass ${REDIS__PASSWORD:-dingbridge_redis_password}
     volumes:
       - redis_data:/data
 
