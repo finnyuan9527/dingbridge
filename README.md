@@ -74,6 +74,8 @@ docker compose up -d
 
 仓库内的 [docker-compose.yml](docker-compose.yml) 会从 `.env` 读取 `DINGBRIDGE_IMAGE` 作为应用镜像，并自动把 `REDIS__HOST` 指向 Compose 内的 `redis` 服务。
 
+当前仓库的 `.env.example` 默认已经把 `DINGBRIDGE_IMAGE` 指向 `ghcr.io/finnyuan9527/dingbridge:latest`，所以首次部署按文档执行即可。
+
 如果你在 fork、镜像仓库迁移或组织镜像命名空间下部署，请把 `.env` 里的 `DINGBRIDGE_IMAGE` 改成你自己的发布地址，例如 `ghcr.io/<your-owner>/dingbridge:latest`。
 
 源码启动和源码构建镜像仍然支持，但默认建议优先使用上面的已发布镜像。
@@ -235,7 +237,7 @@ uvicorn app.main:app --reload
 ```bash
 cp .env.example .env
 docker build -t dingbridge:latest .
-docker compose up -d
+DINGBRIDGE_IMAGE=dingbridge:latest docker compose up -d
 ```
 
 部署前请确认：
@@ -395,6 +397,8 @@ docker compose up -d
 ```
 
 The repository [docker-compose.yml](docker-compose.yml) reads `DINGBRIDGE_IMAGE` from `.env` for the application container and points `REDIS__HOST` to the Compose-managed `redis` service automatically.
+
+In this repository, `.env.example` already points `DINGBRIDGE_IMAGE` to `ghcr.io/finnyuan9527/dingbridge:latest`, so the first-time deployment steps work as written.
 
 If you deploy from a fork, a mirror, or a different package namespace, update `DINGBRIDGE_IMAGE` in `.env` to your own published image, for example `ghcr.io/<your-owner>/dingbridge:latest`.
 
@@ -557,7 +561,7 @@ If you prefer to build an image from the current source tree yourself:
 ```bash
 cp .env.example .env
 docker build -t dingbridge:latest .
-docker compose up -d
+DINGBRIDGE_IMAGE=dingbridge:latest docker compose up -d
 ```
 
 Before deployment, make sure to:

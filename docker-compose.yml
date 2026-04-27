@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${DINGBRIDGE_IMAGE:-dingbridge:latest}
+    image: ${DINGBRIDGE_IMAGE:?Set DINGBRIDGE_IMAGE in .env or the shell environment}
     container_name: dingbridge-app
     restart: unless-stopped
     ports:
