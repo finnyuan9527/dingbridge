@@ -60,6 +60,24 @@ SaaS / Internal App
 - SQLAlchemy
 - Pydantic Settings
 
+### 5 分钟快速开始
+
+如果你是第一次接触这个项目，建议先按这条最短路径验证服务能否启动：
+
+```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
+cp .env.example .env
+# 编辑 .env，至少补齐 DingTalk / OIDC 基础配置
+# 临时联调可先设置 SECURITY__ALLOW_EPHEMERAL_KEYS=true
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+curl http://127.0.0.1:8000/healthz
+curl http://127.0.0.1:8000/.well-known/openid-configuration
+```
+
+如果你要做正式部署，请继续看下面的“推荐部署步骤”和“签名密钥”说明。
+
 ### 部署建议
 
 生产或联调环境默认推荐直接使用 GitHub Actions 发布的 Docker 镜像启动：
@@ -118,13 +136,42 @@ REDIS__PASSWORD=replace_with_a_strong_password
 # 管理接口密钥
 SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
 
-# 生产环境必须注入稳定 RSA 私钥
+# 本地/临时联调：可先开启进程内临时密钥
+SECURITY__ALLOW_EPHEMERAL_KEYS=true
+```
+
+4. 配置签名密钥。
+
+联调或本地验证时，可直接保留：
+
+```env
+SECURITY__ALLOW_EPHEMERAL_KEYS=true
+```
+
+正式部署时，建议使用稳定 RSA 私钥，并关闭临时密钥：
+
+```env
 SECURITY__JWT_PRIVATE_KEY_PATH=/app/certs/jwt_private.pem
 SECURITY__JWT_PUBLIC_KEY_PATH=/app/certs/jwt_public.pem
 SECURITY__ALLOW_EPHEMERAL_KEYS=false
 ```
 
-4. 准备好 RSA 密钥文件，并确保容器内路径与 `.env` 一致。
+如果你使用文件路径方式，需要把密钥挂载到容器内。例如可以新增一个 `docker-compose.override.yml`：
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./certs:/app/certs:ro
+```
+
+最小密钥生成命令示例：
+
+```bash
+mkdir -p certs
+openssl genrsa -out certs/jwt_private.pem 2048
+openssl rsa -in certs/jwt_private.pem -pubout -out certs/jwt_public.pem
+```
 
 5. 拉取镜像并启动服务：
 
@@ -145,6 +192,73 @@ docker compose logs -f app
 ```bash
 curl http://127.0.0.1:8000/healthz
 ```
+
+#### 使用 oidcdebugger.com 联调
+
+如果你想通过 `https://oidcdebugger.com/` 验证当前 OIDC 流程，先确认服务端客户端配置允许对应回调地址：
+
+- 不要直接使用生产或正式环境里的 confidential client；建议单独创建一次性测试 client
+- `client_id` 使用当前已注册的测试客户端
+- `redirect_uri` 必须已经加入该客户端的白名单
+- 如果你要用 `https://oidcdebugger.com/debug`，需要先把它加入 `redirect_uris`
+
+如果你还没有测试 client，可以通过管理接口创建一个一次性联调用客户端：
+
+```bash
+curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
+  -H 'Content-Type: application/json' \
+  -H 'x-admin-key: your-admin-key' \
+  -d '{
+    "client_id": "oidcdebugger-test",
+    "name": "OIDC Debugger Test",
+    "enabled": true,
+    "client_secret": "replace-with-a-temporary-secret",
+    "redirect_uris": ["https://oidcdebugger.com/debug"]
+  }'
+```
+
+推荐填写：
+
+- `Authorize URI`: `https://your-domain.example.com/oidc/authorize`
+- `Access Token URI`: `https://your-domain.example.com/oidc/token`
+- `Client ID`: 测试客户端的 `client_id`
+- `Client Secret`: 仅填写该测试客户端的 `client_secret`
+- `Scope`: `openid`
+- `Response Type`: `code`
+- `Redirect URI`: 已注册的回调地址，例如 `https://oidcdebugger.com/debug`
+- `State`: 任意随机值
+- `Nonce`: 任意随机值
+- `PKCE`: 开启
+- `Code Challenge Method`: `S256`
+
+注意事项：
+
+- 不要把生产环境 client secret 或长期使用的 secret 输入第三方网站；联调结束后应删除测试 client 或轮换其 secret
+- 当前实现强制要求 PKCE；如果缺少 `code_challenge` 或 `code_challenge_method` 不是 `S256`，`/oidc/authorize` 会直接返回 `400`
+- `redirect_uri` 只要不在客户端白名单内，就会返回 `invalid_redirect_uri`
+- 目前更稳妥的联调方式是使用默认 query redirect 流程；如果第三方工具强依赖 `response_mode=form_post`，需要额外确认兼容性
+
+#### OIDC 联调注意事项
+
+- Authorization Code 只能使用一次；同一个 `code` 第二次调用 `/oidc/token` 会返回 `invalid_grant`
+- Authorization Code 默认有效期为 60 秒；拿到 `code` 后应尽快交换 token
+- `/oidc/token` 中的 `redirect_uri` 必须和 `/oidc/authorize` 阶段使用的值完全一致
+- 如果授权阶段启用了 PKCE，`/oidc/token` 中的 `code_verifier` 必须与当时生成 `code_challenge` 的原始值完全一致
+- 如果使用第三方调试器，请不要再手工调用 `/oidc/token` 混用同一轮 `code`
+- 当前实现更适合标准 query redirect 调试；`response_mode=form_post` 兼容性建议单独验证
+
+#### 常见错误与排查
+
+- `invalid_grant`
+  - 常见原因：`code` 已被消费、`code` 已过期、`redirect_uri` 不一致、`code_verifier` 不匹配
+- `invalid_redirect_uri`
+  - 当前 `redirect_uri` 不在客户端白名单中，或与注册值不完全一致
+- `invalid_client_secret`
+  - `client_id` / `client_secret` 组合不正确
+- `missing SECURITY__JWT_PRIVATE_KEY or SECURITY__JWT_PRIVATE_KEY_PATH`
+  - 在 `SECURITY__ALLOW_EPHEMERAL_KEYS=false` 时未提供签名私钥
+- `401 Unauthorized` on `/oidc/token`
+  - 通常表示客户端认证失败，应检查 Basic Auth 或表单中的 `client_id` / `client_secret`
 
 如果你前面有反向代理和 HTTPS，对外还需要额外确认：
 
@@ -252,28 +366,28 @@ DINGBRIDGE_IMAGE=dingbridge:latest docker compose up -d
 
 OIDC:
 
-- `GET /.well-known/openid-configuration`
-- `GET /oidc/authorize`
-- `POST /oidc/token`
-- `GET /oidc/userinfo`
-- `GET /oidc/jwks.json`
-- `GET /oidc/logout`
-- `POST /oidc/logout`
+- `GET /.well-known/openid-configuration`：OIDC Discovery 文档
+- `GET /oidc/authorize`：Authorization Code 授权入口
+- `POST /oidc/token`：交换 access token / id token / refresh token
+- `GET /oidc/userinfo`：读取当前 access token 对应的用户信息
+- `GET /oidc/jwks.json`：提供 JWT 验签所需的公钥
+- `GET /oidc/logout`：发起前端登出流程
+- `POST /oidc/logout`：执行后端登出与 refresh token 失效
 
 DingTalk:
 
-- `GET /dingtalk/login`
-- `GET /dingtalk/callback`
+- `GET /dingtalk/login`：跳转钉钉 OAuth 登录
+- `GET /dingtalk/callback`：接收钉钉登录回调
 
 Admin:
 
-- `GET /admin/idp-settings`
-- `PUT /admin/idp-settings`
-- `GET /admin/dingtalk-apps`
-- `POST /admin/dingtalk-apps`
-- `GET /admin/oidc-clients`
-- `POST /admin/oidc-clients`
-- `POST /admin/reload`
+- `GET /admin/idp-settings`：读取当前 IdP 配置，需 `x-admin-key`
+- `PUT /admin/idp-settings`：更新当前 IdP 配置，需 `x-admin-key`
+- `GET /admin/dingtalk-apps`：列出钉钉应用配置，需 `x-admin-key`
+- `POST /admin/dingtalk-apps`：创建或更新钉钉应用配置，需 `x-admin-key`
+- `GET /admin/oidc-clients`：列出 OIDC 客户端配置，需 `x-admin-key`
+- `POST /admin/oidc-clients`：创建或更新 OIDC 客户端配置，需 `x-admin-key`
+- `POST /admin/reload`：刷新运行时配置缓存，需 `x-admin-key`
 
 ### 测试
 
@@ -384,6 +498,24 @@ Flow:
 - SQLAlchemy
 - Pydantic Settings
 
+### 5-Minute Quick Start
+
+If you are new to the project, use this shortest path first to verify the service can start:
+
+```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
+cp .env.example .env
+# Edit .env and fill in the basic DingTalk / OIDC settings
+# For temporary local validation, you can start with SECURITY__ALLOW_EPHEMERAL_KEYS=true
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+curl http://127.0.0.1:8000/healthz
+curl http://127.0.0.1:8000/.well-known/openid-configuration
+```
+
+For production deployment, continue with the detailed steps and signing key guidance below.
+
 ### Deployment Recommendation
 
 For production or shared testing environments, the default recommendation is to run the published Docker image from GitHub Actions:
@@ -442,13 +574,42 @@ REDIS__PASSWORD=replace_with_a_strong_password
 # Admin API key
 SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
 
-# Production must use a stable RSA key pair
+# Local or temporary validation can start with ephemeral keys
+SECURITY__ALLOW_EPHEMERAL_KEYS=true
+```
+
+4. Configure signing keys.
+
+For local or temporary debugging, you can keep:
+
+```env
+SECURITY__ALLOW_EPHEMERAL_KEYS=true
+```
+
+For production, use a stable RSA key pair and disable ephemeral keys:
+
+```env
 SECURITY__JWT_PRIVATE_KEY_PATH=/app/certs/jwt_private.pem
 SECURITY__JWT_PUBLIC_KEY_PATH=/app/certs/jwt_public.pem
 SECURITY__ALLOW_EPHEMERAL_KEYS=false
 ```
 
-4. Prepare the RSA key files and make sure the paths inside the container match the values in `.env`.
+If you use file paths, make sure the key files are mounted into the container. For example, create a `docker-compose.override.yml`:
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./certs:/app/certs:ro
+```
+
+Minimal key generation example:
+
+```bash
+mkdir -p certs
+openssl genrsa -out certs/jwt_private.pem 2048
+openssl rsa -in certs/jwt_private.pem -pubout -out certs/jwt_public.pem
+```
 
 5. Pull the image and start the stack:
 
@@ -469,6 +630,73 @@ docker compose logs -f app
 ```bash
 curl http://127.0.0.1:8000/healthz
 ```
+
+#### Testing With oidcdebugger.com
+
+If you want to validate the current OIDC flow with `https://oidcdebugger.com/`, make sure the server-side client configuration allows the redirect URI first:
+
+- do not use a production or long-lived confidential client; create a disposable test client for debugger-based validation
+- use a registered test `client_id`
+- the `redirect_uri` must already be in that client's allowlist
+- if you want to use `https://oidcdebugger.com/debug`, add it to the client's `redirect_uris` first
+
+If you do not have a dedicated test client yet, you can create a disposable one through the admin API:
+
+```bash
+curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
+  -H 'Content-Type: application/json' \
+  -H 'x-admin-key: your-admin-key' \
+  -d '{
+    "client_id": "oidcdebugger-test",
+    "name": "OIDC Debugger Test",
+    "enabled": true,
+    "client_secret": "replace-with-a-temporary-secret",
+    "redirect_uris": ["https://oidcdebugger.com/debug"]
+  }'
+```
+
+Recommended values:
+
+- `Authorize URI`: `https://your-domain.example.com/oidc/authorize`
+- `Access Token URI`: `https://your-domain.example.com/oidc/token`
+- `Client ID`: the test client's `client_id`
+- `Client Secret`: only the `client_secret` of that disposable test client
+- `Scope`: `openid`
+- `Response Type`: `code`
+- `Redirect URI`: a registered callback such as `https://oidcdebugger.com/debug`
+- `State`: any random value
+- `Nonce`: any random value
+- `PKCE`: enabled
+- `Code Challenge Method`: `S256`
+
+Notes:
+
+- never paste a production client secret or any long-lived secret into a third-party site; after testing, delete the disposable client or rotate its secret
+- the current implementation requires PKCE; if `code_challenge` is missing or `code_challenge_method` is not `S256`, `/oidc/authorize` returns `400`
+- if the `redirect_uri` is not in the client allowlist, the server returns `invalid_redirect_uri`
+- the safest interop path right now is the default query redirect flow; if a third-party debugger strictly requires `response_mode=form_post`, verify compatibility separately
+
+#### OIDC Debugging Notes
+
+- an authorization code is single-use; reusing the same `code` on `/oidc/token` returns `invalid_grant`
+- authorization codes expire after 60 seconds by default, so exchange them quickly
+- the `redirect_uri` sent to `/oidc/token` must exactly match the one used during `/oidc/authorize`
+- if PKCE was used during authorization, the `code_verifier` on `/oidc/token` must exactly match the original value used to derive the `code_challenge`
+- when using a third-party debugger, do not also manually call `/oidc/token` with the same authorization code
+- the current implementation is better suited to standard query redirect debugging; verify `response_mode=form_post` compatibility separately if you depend on it
+
+#### Common Errors And Troubleshooting
+
+- `invalid_grant`
+  - common causes: the `code` was already consumed, the `code` expired, the `redirect_uri` does not match, or the `code_verifier` is wrong
+- `invalid_redirect_uri`
+  - the current `redirect_uri` is not in the client allowlist or does not exactly match the registered value
+- `invalid_client_secret`
+  - the `client_id` / `client_secret` pair is incorrect
+- `missing SECURITY__JWT_PRIVATE_KEY or SECURITY__JWT_PRIVATE_KEY_PATH`
+  - a signing private key is required when `SECURITY__ALLOW_EPHEMERAL_KEYS=false`
+- `401 Unauthorized` on `/oidc/token`
+  - usually indicates failed client authentication; check Basic Auth or the submitted `client_id` / `client_secret`
 
 If you deploy behind HTTPS and a reverse proxy, also verify:
 
@@ -576,28 +804,28 @@ Before deployment, make sure to:
 
 OIDC:
 
-- `GET /.well-known/openid-configuration`
-- `GET /oidc/authorize`
-- `POST /oidc/token`
-- `GET /oidc/userinfo`
-- `GET /oidc/jwks.json`
-- `GET /oidc/logout`
-- `POST /oidc/logout`
+- `GET /.well-known/openid-configuration`: OIDC discovery document
+- `GET /oidc/authorize`: authorization entrypoint for the Authorization Code flow
+- `POST /oidc/token`: exchange authorization codes or refresh tokens for tokens
+- `GET /oidc/userinfo`: retrieve user claims for the current access token
+- `GET /oidc/jwks.json`: publish public keys for JWT verification
+- `GET /oidc/logout`: initiate front-channel logout
+- `POST /oidc/logout`: perform logout and revoke refresh-token-backed sessions
 
 DingTalk:
 
-- `GET /dingtalk/login`
-- `GET /dingtalk/callback`
+- `GET /dingtalk/login`: redirect the browser to DingTalk OAuth
+- `GET /dingtalk/callback`: receive the DingTalk OAuth callback
 
 Admin:
 
-- `GET /admin/idp-settings`
-- `PUT /admin/idp-settings`
-- `GET /admin/dingtalk-apps`
-- `POST /admin/dingtalk-apps`
-- `GET /admin/oidc-clients`
-- `POST /admin/oidc-clients`
-- `POST /admin/reload`
+- `GET /admin/idp-settings`: read current IdP settings, requires `x-admin-key`
+- `PUT /admin/idp-settings`: update current IdP settings, requires `x-admin-key`
+- `GET /admin/dingtalk-apps`: list DingTalk app configs, requires `x-admin-key`
+- `POST /admin/dingtalk-apps`: create or update DingTalk app configs, requires `x-admin-key`
+- `GET /admin/oidc-clients`: list OIDC client configs, requires `x-admin-key`
+- `POST /admin/oidc-clients`: create or update OIDC client configs, requires `x-admin-key`
+- `POST /admin/reload`: refresh runtime config caches, requires `x-admin-key`
 
 ### Testing
 
