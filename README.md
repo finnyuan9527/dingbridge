@@ -65,8 +65,9 @@ SaaS / Internal App
 生产或联调环境默认推荐直接使用 GitHub Actions 发布的 Docker 镜像启动：
 
 ```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
 cp .env.example .env
-# 编辑 .env，至少补齐业务配置，并将 DINGBRIDGE_IMAGE 设置为 ghcr.io/finnyuan9527/dingbridge:latest
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
 docker compose up -d
 ```
@@ -76,6 +77,95 @@ docker compose up -d
 如果你在 fork、镜像仓库迁移或组织镜像命名空间下部署，请把 `.env` 里的 `DINGBRIDGE_IMAGE` 改成你自己的发布地址，例如 `ghcr.io/<your-owner>/dingbridge:latest`。
 
 源码启动和源码构建镜像仍然支持，但默认建议优先使用上面的已发布镜像。
+
+#### 推荐部署步骤
+
+1. 首次部署时先拉取仓库代码：
+
+```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
+```
+
+2. 复制环境变量模板：
+
+```bash
+cp .env.example .env
+```
+
+3. 编辑 `.env`，至少确认这些字段：
+
+```env
+# 发布镜像地址
+DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:latest
+
+# 钉钉应用
+DINGTALK__APP_KEY=your_app_key
+DINGTALK__APP_SECRET=your_app_secret
+DINGTALK__CALLBACK_URL=https://your-domain.example.com/dingtalk/callback
+
+# 对外 OIDC 地址
+OIDC__ISSUER=https://your-domain.example.com
+OIDC__CLIENT_ID=your-client-id
+OIDC__CLIENT_SECRET=your-client-secret
+OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
+
+# Redis 密码
+REDIS__PASSWORD=replace_with_a_strong_password
+
+# 管理接口密钥
+SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
+
+# 生产环境必须注入稳定 RSA 私钥
+SECURITY__JWT_PRIVATE_KEY_PATH=/app/certs/jwt_private.pem
+SECURITY__JWT_PUBLIC_KEY_PATH=/app/certs/jwt_public.pem
+SECURITY__ALLOW_EPHEMERAL_KEYS=false
+```
+
+4. 准备好 RSA 密钥文件，并确保容器内路径与 `.env` 一致。
+
+5. 拉取镜像并启动服务：
+
+```bash
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+6. 检查容器是否正常启动：
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+7. 验证服务是否可访问：
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+如果你前面有反向代理和 HTTPS，对外还需要额外确认：
+
+- `OIDC__ISSUER` 与外部访问域名完全一致
+- `DINGTALK__CALLBACK_URL` 已配置到钉钉应用后台
+- 反向代理已透传 `Host` 和 `X-Forwarded-Proto`
+- 8000 端口只暴露给反向代理或内网，不直接公网裸露
+
+#### 升级已有部署到新版本镜像
+
+如果你本地已经有这个仓库，只是要更新到 GitHub Actions 发布的新镜像，可直接执行：
+
+```bash
+git pull
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+如果你要固定到某个发布版本，也可以把 `.env` 中的 `DINGBRIDGE_IMAGE` 改成 tag 版，例如：
+
+```env
+DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:v0.1.0
+```
 
 ### 源码启动
 
@@ -297,8 +387,9 @@ Flow:
 For production or shared testing environments, the default recommendation is to run the published Docker image from GitHub Actions:
 
 ```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
 cp .env.example .env
-# Edit .env, fill in the required runtime settings, and set DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:latest
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
 docker compose up -d
 ```
@@ -308,6 +399,95 @@ The repository [docker-compose.yml](docker-compose.yml) reads `DINGBRIDGE_IMAGE`
 If you deploy from a fork, a mirror, or a different package namespace, update `DINGBRIDGE_IMAGE` in `.env` to your own published image, for example `ghcr.io/<your-owner>/dingbridge:latest`.
 
 Source startup and source-built images are still supported, but the published image should be the default path.
+
+#### Recommended Deployment Steps
+
+1. For a first-time deployment, clone the repository first:
+
+```bash
+git clone https://github.com/finnyuan9527/dingbridge.git
+cd dingbridge
+```
+
+2. Copy the environment template:
+
+```bash
+cp .env.example .env
+```
+
+3. Edit `.env` and make sure these values are set correctly:
+
+```env
+# Published image reference
+DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:latest
+
+# DingTalk app
+DINGTALK__APP_KEY=your_app_key
+DINGTALK__APP_SECRET=your_app_secret
+DINGTALK__CALLBACK_URL=https://your-domain.example.com/dingtalk/callback
+
+# Public OIDC endpoint
+OIDC__ISSUER=https://your-domain.example.com
+OIDC__CLIENT_ID=your-client-id
+OIDC__CLIENT_SECRET=your-client-secret
+OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
+
+# Redis password
+REDIS__PASSWORD=replace_with_a_strong_password
+
+# Admin API key
+SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
+
+# Production must use a stable RSA key pair
+SECURITY__JWT_PRIVATE_KEY_PATH=/app/certs/jwt_private.pem
+SECURITY__JWT_PUBLIC_KEY_PATH=/app/certs/jwt_public.pem
+SECURITY__ALLOW_EPHEMERAL_KEYS=false
+```
+
+4. Prepare the RSA key files and make sure the paths inside the container match the values in `.env`.
+
+5. Pull the image and start the stack:
+
+```bash
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+6. Check whether the containers are healthy:
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+7. Verify the application is reachable:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+If you deploy behind HTTPS and a reverse proxy, also verify:
+
+- `OIDC__ISSUER` exactly matches the public domain
+- `DINGTALK__CALLBACK_URL` is registered in the DingTalk app configuration
+- the reverse proxy forwards `Host` and `X-Forwarded-Proto`
+- port 8000 is only exposed to the proxy or a trusted internal network
+
+#### Updating an Existing Deployment
+
+If you already have the repository locally and just want to update to a newer image published by GitHub Actions:
+
+```bash
+git pull
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+If you want to pin a specific release image instead of `latest`, set `DINGBRIDGE_IMAGE` in `.env` to a version tag such as:
+
+```env
+DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:v0.1.0
+```
 
 ### Run From Source
 
