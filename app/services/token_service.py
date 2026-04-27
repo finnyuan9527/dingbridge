@@ -222,12 +222,25 @@ def get_jwks() -> Dict[str, Any]:
 
 
 def decode_and_verify_bearer(token: str, *, audience: str | list[str]) -> Dict[str, Any]:
+    """
+    验证 Bearer Token 并返回 claims。
+
+    python-jose 的 decode() 中 audience 只接受 str，不支持 list。
+    对于多客户端场景，逐一尝试每个 audience，任一成功即返回。
+    """
     _, public_key_pem = _get_keys()
-    return jwt.decode(
-        token,
-        public_key_pem,
-        algorithms=[settings.security.jwt_algorithm],
-        issuer=_issuer(),
-        audience=audience,
-        options={"verify_at_hash": False},
-    )
+    audiences = [audience] if isinstance(audience, str) else list(audience)
+    last_exc: Exception | None = None
+    for aud in audiences:
+        try:
+            return jwt.decode(
+                token,
+                public_key_pem,
+                algorithms=[settings.security.jwt_algorithm],
+                issuer=_issuer(),
+                audience=aud,
+                options={"verify_at_hash": False},
+            )
+        except Exception as e:
+            last_exc = e
+    raise last_exc or RuntimeError("no audience to verify")

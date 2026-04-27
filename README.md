@@ -170,6 +170,18 @@ python3 -m pytest -q
 
 GitHub Actions 会在 `main` 分支推送和 pull request 时运行同一套测试。
 
+发布方式：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+推送 `v*` tag 后，GitHub Actions 会：
+
+- 创建 GitHub Release（源码归档由 GitHub 自动附带）
+- 构建并推送 Docker 镜像到 `ghcr.io/finnyuan9527/dingbridge`
+
 ### 项目结构
 
 ```text
@@ -367,6 +379,18 @@ python3 -m pytest -q
 ```
 
 GitHub Actions runs the same test suite on pushes to `main` and on pull requests.
+
+Release flow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+When a `v*` tag is pushed, GitHub Actions will:
+
+- create a GitHub Release, with source archives automatically provided by GitHub
+- build and push the Docker image to `ghcr.io/finnyuan9527/dingbridge`
 
 ### Project Structure
 

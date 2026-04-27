@@ -2,3 +2,7 @@
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+
+[tool.pyrefly]
+# 忽略 Pyrefly 虚拟内存临时文件产生的误报
+ignore = ["/__pyrefly_virtual__/**"]

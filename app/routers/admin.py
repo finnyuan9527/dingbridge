@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -17,9 +19,20 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _require_admin_key(x_admin_key: str | None):
-    if not settings.security.admin_api_key:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_disabled")
-    if not x_admin_key or x_admin_key != settings.security.admin_api_key:
+    """校验 Admin API Key。
+
+    - 使用 hmac.compare_digest 做常量时间比较，防止时序攻击。
+    - 统一返回同一个 403，不区分「未配置」和「密钥错误」，避免信息泄露。
+    """
+    configured_key = settings.security.admin_api_key
+    provided_key = x_admin_key or ""
+    # 两个条件都必须满足：key 已配置 且 比较结果相等
+    # 注意：即使 configured_key 为空也要走 compare_digest，保证恒定时间
+    key_ok = bool(configured_key) and hmac.compare_digest(
+        configured_key.encode("utf-8"),
+        provided_key.encode("utf-8"),
+    )
+    if not key_ok:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
 
