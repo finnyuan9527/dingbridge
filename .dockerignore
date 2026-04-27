@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.env
+.env.prod
+.git
+.gitignore
+.vscode
+.DS_Store
+# certs/*.key
+coverage.xml
+htmlcov/

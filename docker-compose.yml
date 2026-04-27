@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    container_name: dingbridge-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    environment:
+      - REDIS__HOST=redis
+      - REDIS__PORT=6379
+      - REDIS__PASSWORD=123qwe
+
+  redis:
+    image: redis:7-alpine
+    container_name: dingbridge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # 如果生产环境需要密码，请修改启动命令并同步更新 app 的环境变量
+    command: redis-server --requirepass 123qwe
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
