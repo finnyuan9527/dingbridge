@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: ${DINGBRIDGE_IMAGE:-dingbridge:latest}
     container_name: dingbridge-app
     restart: unless-stopped
     ports:

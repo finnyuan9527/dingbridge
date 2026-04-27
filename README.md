@@ -60,7 +60,24 @@ SaaS / Internal App
 - SQLAlchemy
 - Pydantic Settings
 
-### 快速开始
+### 部署建议
+
+生产或联调环境默认推荐直接使用 GitHub Actions 发布的 Docker 镜像启动：
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少补齐业务配置，并将 DINGBRIDGE_IMAGE 设置为 ghcr.io/finnyuan9527/dingbridge:latest
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+仓库内的 [docker-compose.yml](docker-compose.yml) 会从 `.env` 读取 `DINGBRIDGE_IMAGE` 作为应用镜像，并自动把 `REDIS__HOST` 指向 Compose 内的 `redis` 服务。
+
+如果你在 fork、镜像仓库迁移或组织镜像命名空间下部署，请把 `.env` 里的 `DINGBRIDGE_IMAGE` 改成你自己的发布地址，例如 `ghcr.io/<your-owner>/dingbridge:latest`。
+
+源码启动和源码构建镜像仍然支持，但默认建议优先使用上面的已发布镜像。
+
+### 源码启动
 
 #### 1. 准备环境
 
@@ -121,10 +138,14 @@ uvicorn app.main:app --reload
 - API docs: `http://127.0.0.1:8000/docs`
 - OIDC discovery: `http://127.0.0.1:8000/.well-known/openid-configuration`
 
-### Docker
+### 源码构建 Docker 镜像
+
+如果你希望基于当前仓库源码自行构建镜像，可以执行：
 
 ```bash
-docker compose up --build
+cp .env.example .env
+docker build -t dingbridge:latest .
+docker compose up -d
 ```
 
 部署前请确认：
@@ -181,6 +202,7 @@ git push origin v0.1.0
 
 - 创建 GitHub Release（源码归档由 GitHub 自动附带）
 - 构建并推送 Docker 镜像到 `ghcr.io/finnyuan9527/dingbridge`
+- 更新推荐部署镜像标签 `ghcr.io/finnyuan9527/dingbridge:latest`
 
 ### 项目结构
 
@@ -270,7 +292,24 @@ Flow:
 - SQLAlchemy
 - Pydantic Settings
 
-### Quick Start
+### Deployment Recommendation
+
+For production or shared testing environments, the default recommendation is to run the published Docker image from GitHub Actions:
+
+```bash
+cp .env.example .env
+# Edit .env, fill in the required runtime settings, and set DINGBRIDGE_IMAGE=ghcr.io/finnyuan9527/dingbridge:latest
+docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose up -d
+```
+
+The repository [docker-compose.yml](docker-compose.yml) reads `DINGBRIDGE_IMAGE` from `.env` for the application container and points `REDIS__HOST` to the Compose-managed `redis` service automatically.
+
+If you deploy from a fork, a mirror, or a different package namespace, update `DINGBRIDGE_IMAGE` in `.env` to your own published image, for example `ghcr.io/<your-owner>/dingbridge:latest`.
+
+Source startup and source-built images are still supported, but the published image should be the default path.
+
+### Run From Source
 
 #### 1. Install dependencies
 
@@ -331,10 +370,14 @@ Useful URLs:
 - API docs: `http://127.0.0.1:8000/docs`
 - OIDC discovery: `http://127.0.0.1:8000/.well-known/openid-configuration`
 
-### Docker
+### Build a Docker Image From Source
+
+If you prefer to build an image from the current source tree yourself:
 
 ```bash
-docker compose up --build
+cp .env.example .env
+docker build -t dingbridge:latest .
+docker compose up -d
 ```
 
 Before deployment, make sure to:
@@ -391,6 +434,7 @@ When a `v*` tag is pushed, GitHub Actions will:
 
 - create a GitHub Release, with source archives automatically provided by GitHub
 - build and push the Docker image to `ghcr.io/finnyuan9527/dingbridge`
+- refresh the recommended deployment tag `ghcr.io/finnyuan9527/dingbridge:latest`
 
 ### Project Structure
 
