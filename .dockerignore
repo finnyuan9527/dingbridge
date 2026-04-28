@@ -1,16 +1,58 @@
-__pycache__
-*.pyc
+# Git and local workspace state
+.git
+.gitignore
+.github/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
 *.pyo
 *.pyd
+*$py.class
 .Python
+*.egg-info/
+dist/
+build/
+*.egg
 env/
 venv/
 .venv/
+ENV/
+
+# Environment files may contain secrets.
 .env
-.git
-.gitignore
-.vscode
-.DS_Store
-# certs/*.key
+.env.*
+!.env.example
+
+# Certificates, keys, and local signing material.
+certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Local databases and Docker volumes.
+*.sqlite3
+*.db
+redis_data/
+dingbridge_data/
+
+# Local planning artifacts.
+docs/superpowers/
+
+# Test and tooling outputs.
+.pytest_cache/
+.coverage
+coverage/
 coverage.xml
 htmlcov/
+.mypy_cache/
+.ruff_cache/

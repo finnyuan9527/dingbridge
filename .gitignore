@@ -19,6 +19,12 @@ ENV/
 
 # Certificates and keys (contain private keys!)
 certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
 
 # Database
 *.sqlite3
@@ -39,3 +45,12 @@ Thumbs.db
 
 # Docker volumes
 redis_data/
+dingbridge_data/
+
+# Test and tooling caches
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+.mypy_cache/
+.ruff_cache/
