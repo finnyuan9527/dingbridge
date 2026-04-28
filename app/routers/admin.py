@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hmac
+from pathlib import Path
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi.templating import Jinja2Templates
 from pydantic import AnyHttpUrl, BaseModel
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import HTMLResponse
 
 from app.config import settings
 from app.db import get_session
@@ -16,6 +19,8 @@ from app.services import client_registry
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+BASE_DIR = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 def _require_admin_key(x_admin_key: str | None):
@@ -266,3 +271,19 @@ def _reload_sync():
 async def reload_runtime_config(x_admin_key: str | None = Header(default=None)):
     _require_admin_key(x_admin_key)
     return await run_in_threadpool(_reload_sync)
+
+
+@router.get("/console/oidc-clients", response_class=HTMLResponse)
+async def oidc_client_console(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/oidc_clients.html",
+        context={
+            "request": request,
+            "page_title": "OIDC Client Console",
+            "oidc_clients_endpoint": "/admin/oidc-clients",
+            "dingtalk_apps_endpoint": "/admin/dingtalk-apps",
+            "oidc_console_css": "/static/admin/oidc_clients.css",
+            "oidc_console_js": "/static/admin/oidc_clients.js",
+        },
+    )

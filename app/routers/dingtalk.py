@@ -94,7 +94,7 @@ async def dingtalk_callback(request: Request, code: str, state: str):
         )
     except Exception as e:
         ip = request.client.host if request.client else None
-        audit.log_login_failure(
+        await audit.log_login_failure_async(
             reason=type(e).__name__,
             source="dingtalk_callback",
             client_id=client_id,

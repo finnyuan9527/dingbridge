@@ -18,10 +18,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # 复制应用代码
 COPY app/ app/
+COPY alembic.ini .
+COPY alembic/ alembic/
 
 # 创建非 root 用户运行应用（安全最佳实践）
-RUN adduser --disabled-password --gecos "" appuser && \
-    chown -R appuser:appuser /app
+RUN mkdir -p /data && \
+    adduser --disabled-password --gecos "" appuser && \
+    chown -R appuser:appuser /app /data
 USER appuser
 
 # 暴露端口

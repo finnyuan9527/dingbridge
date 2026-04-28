@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ page_title }}</title>
+  <link rel="stylesheet" href="{{ oidc_console_css }}" />
+</head>
+<body>
+  <main class="page">
+    <section class="control-bar">
+      <div class="control-bar__intro">
+        <p class="eyebrow">OIDC Administration</p>
+        <h1>{{ page_title }}</h1>
+        <p class="control-bar__summary">Manage clients, rotate credentials, and keep DingTalk mappings organized from one operator workspace.</p>
+      </div>
+
+      <div class="control-bar__tools">
+        <label class="control-field" for="admin-key">
+          <span>Admin API Key</span>
+          <input id="admin-key" name="x-admin-key" type="password" placeholder="Paste x-admin-key here" />
+        </label>
+        <div class="control-actions">
+          <button id="load-btn" type="button">Load Clients</button>
+          <button id="new-btn" type="button" class="secondary">New Client</button>
+        </div>
+        <div id="status" class="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <form id="client-form" class="panel editor-panel stack">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Form Workspace</p>
+            <h2>Client Editor</h2>
+          </div>
+          <span class="panel-mode" id="editor-mode">Create or update a client</span>
+        </div>
+
+        <section class="editor-section stack">
+          <div class="section-heading">
+            <p class="section-kicker">Identity</p>
+            <h3>Client identity</h3>
+            <p class="muted">Use a stable `client_id`. Existing clients keep this key locked during edits.</p>
+          </div>
+          <div class="field-grid">
+            <label for="client_id">
+              client_id
+              <input id="client_id" name="client_id" type="text" placeholder="coze-client-id" required />
+            </label>
+            <label for="name">
+              name
+              <input id="name" name="name" type="text" placeholder="Coze OIDC Client" />
+            </label>
+          </div>
+        </section>
+
+        <section class="editor-section stack">
+          <div class="section-heading">
+            <p class="section-kicker">Security</p>
+            <h3>Credential handling</h3>
+            <p class="muted">Existing secrets are never returned by the API. Enter a new secret only when creating or rotating credentials.</p>
+          </div>
+          <label for="client_secret">
+            client_secret
+            <input id="client_secret" name="client_secret" type="text" placeholder="Leave blank to keep current secret on update" />
+          </label>
+        </section>
+
+        <section class="editor-section stack">
+          <div class="section-heading">
+            <p class="section-kicker">Access</p>
+            <h3>Redirect and mapping</h3>
+            <p class="muted">Bind redirect URIs and the optional DingTalk app mapping used by this client.</p>
+          </div>
+          <label for="redirect_uris">
+            redirect_uris
+            <textarea id="redirect_uris" name="redirect_uris" placeholder="One redirect URI per line" required></textarea>
+          </label>
+          <div class="field-grid field-grid--supporting">
+            <label for="dingtalk_app_id">
+              dingtalk_app_id
+              <select id="dingtalk_app_id" name="dingtalk_app_id">
+                <option value="">Use default / none</option>
+              </select>
+            </label>
+            <label class="checkbox checkbox--framed" for="enabled">
+              <input id="enabled" name="enabled" type="checkbox" checked />
+              enabled
+            </label>
+          </div>
+        </section>
+
+        <div class="editor-actions">
+          <button type="submit">Save Client</button>
+          <button id="reset-btn" type="button" class="secondary">Reset Form</button>
+        </div>
+      </form>
+
+      <aside class="panel browser-panel stack">
+        <div class="panel-header panel-header--tight">
+          <div>
+            <p class="eyebrow">Client Browser</p>
+            <h2>Existing Clients</h2>
+          </div>
+          <span class="badge" id="client-count">0 clients</span>
+        </div>
+
+        <p class="muted browser-panel__summary">Use the table to pick a client for editing. The editor remains the primary workspace on the left.</p>
+
+        <div class="endpoint-list">
+          <div class="endpoint">GET {{ oidc_clients_endpoint }}</div>
+          <div class="endpoint">GET {{ dingtalk_apps_endpoint }}</div>
+          <div class="endpoint">POST {{ oidc_clients_endpoint }}</div>
+        </div>
+
+        <div class="browser-table-wrap">
+          <table class="browser-table">
+            <thead>
+              <tr>
+                <th>client_id</th>
+                <th>name</th>
+                <th>enabled</th>
+                <th>dingtalk_app_id</th>
+                <th>redirect_uris</th>
+              </tr>
+            </thead>
+            <tbody id="client-rows">
+              <tr><td colspan="5" class="muted">Load clients to edit an existing OIDC client.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script
+    src="{{ oidc_console_js }}"
+    data-oidc-clients-endpoint="{{ oidc_clients_endpoint }}"
+    data-dingtalk-apps-endpoint="{{ dingtalk_apps_endpoint }}"
+  ></script>
+</body>
+</html>

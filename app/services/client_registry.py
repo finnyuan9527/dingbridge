@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from pydantic import AnyHttpUrl, BaseModel
 
 from app.config import settings
+from app.db.migrations import ensure_schema_current
 from app.services import config_store
 
 class OIDCClient(BaseModel):
@@ -85,6 +86,7 @@ class ClientRegistry:
 
     @classmethod
     def _load_from_db(cls):
+        ensure_schema_current()
         config_store.seed_defaults_if_needed()
 
         idp_raw = config_store.load_idp_settings()
@@ -120,6 +122,8 @@ class ClientRegistry:
                 return
             try:
                 cls._load_from_db()
+            except RuntimeError:
+                raise
             except Exception:
                 cls._load_from_settings()
 

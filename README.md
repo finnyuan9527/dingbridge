@@ -70,7 +70,9 @@ cd dingbridge
 cp .env.example .env
 # 编辑 .env，至少补齐 DingTalk / OIDC 基础配置
 # 临时联调可先设置 SECURITY__ALLOW_EPHEMERAL_KEYS=true
+# Docker 默认把 SQLite 数据放在 Compose volume 的 /data；正式部署建议改成 MySQL
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 curl http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/.well-known/openid-configuration
@@ -87,6 +89,7 @@ git clone https://github.com/finnyuan9527/dingbridge.git
 cd dingbridge
 cp .env.example .env
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 ```
 
@@ -133,6 +136,12 @@ OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
 # Redis 密码
 REDIS__PASSWORD=replace_with_a_strong_password
 
+# 数据库
+# Docker 默认使用持久化 SQLite volume，适合单机试用
+DATABASE__URL=sqlite:////data/dingbridge.sqlite3
+# 生产推荐 MySQL
+# DATABASE__URL=mysql+pymysql://dingbridge:change_me@mysql:3306/dingbridge?charset=utf8mb4
+
 # 管理接口密钥
 SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
 
@@ -173,25 +182,93 @@ openssl genrsa -out certs/jwt_private.pem 2048
 openssl rsa -in certs/jwt_private.pem -pubout -out certs/jwt_public.pem
 ```
 
-5. 拉取镜像并启动服务：
+5. 拉取镜像：
 
 ```bash
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+```
+
+6. 初始化或升级数据库 schema：
+
+```bash
+docker compose run --rm app alembic upgrade head
+```
+
+默认 Docker 部署会把 SQLite 数据库存到 Compose 的 `dingbridge_data` volume 中，因此这一步的迁移结果会保留下来。正式部署仍然更推荐把 `DATABASE__URL` 指向外部 MySQL。
+
+7. 启动服务：
+
+```bash
 docker compose up -d
 ```
 
-6. 检查容器是否正常启动：
+8. 检查容器是否正常启动：
 
 ```bash
 docker compose ps
 docker compose logs -f app
 ```
 
-7. 验证服务是否可访问：
+9. 验证服务是否可访问：
 
 ```bash
 curl http://127.0.0.1:8000/healthz
 ```
+
+#### Admin Console 管理页
+
+当前版本已经提供最小可用的 OIDC Client 管理页，适合在首次部署后快速创建或维护多个客户端配置。
+
+访问地址：
+
+- Docker/源码默认本地地址：`http://127.0.0.1:8000/admin/console/oidc-clients`
+- 线上部署地址：`https://your-domain.example.com/admin/console/oidc-clients`
+
+使用前提：
+
+- `.env` 中必须设置 `SECURITY__ADMIN_API_KEY`
+- 该页面本身不会建立独立登录态，而是由浏览器在页面内填写 `x-admin-key` 后调用 Admin API
+- 因为管理页会直接操作 `/admin/oidc-clients` 和 `/admin/dingtalk-apps`，建议只在受信任内网、堡垒机或受限反向代理后暴露
+
+推荐使用步骤：
+
+1. 打开 `/admin/console/oidc-clients`
+2. 在 `Admin API Key` 输入框填入 `SECURITY__ADMIN_API_KEY`
+3. 点击 `Load Clients`，加载当前 OIDC Client 列表和 DingTalk App 列表
+4. 如需新增客户端，点击 `New Client`
+5. 填写 `client_id`、`name`、`redirect_uris`
+6. 首次创建时必须填写 `client_secret`
+7. 如需绑定指定钉钉应用，可选择 `dingtalk_app_id`
+8. 点击 `Save Client`
+
+当前管理页行为说明：
+
+- 支持列出已有 OIDC Client
+- 支持新建客户端
+- 支持编辑 `name`、`enabled`、`redirect_uris`、`dingtalk_app_id`
+- 更新已有客户端时，`client_secret` 留空表示保持原值不变
+- 当前版本不会回显已有 `client_secret`
+- 当前版本不提供删除按钮；如需删除能力，建议后续配合审计和权限控制单独设计
+- 当前页面只管理 OIDC Client；DingTalk App 仍通过 Admin API 管理
+
+#### 审计日志
+
+当前版本会把以下安全相关事件持久化到数据库表 `audit_logs`：
+
+- `login_success`
+- `login_failure`
+- `token_issued`
+
+这些事件在落库的同时仍保留标准 logger 输出。当前版本还没有提供审计日志查询页面或查询 API，如需排查，可直接查询数据库，例如：
+
+```sql
+SELECT id, event, client_id, user_sub, created_at
+FROM audit_logs
+ORDER BY id DESC
+LIMIT 20;
+```
+
+如果使用默认 Docker SQLite 部署，数据库文件位于应用容器的 `/data/dingbridge.sqlite3`。如果使用 MySQL，请使用对应 MySQL 客户端连接 `DATABASE__URL` 指向的数据库查询。
 
 #### 使用 oidcdebugger.com 联调
 
@@ -257,6 +334,8 @@ curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
   - `client_id` / `client_secret` 组合不正确
 - `missing SECURITY__JWT_PRIVATE_KEY or SECURITY__JWT_PRIVATE_KEY_PATH`
   - 在 `SECURITY__ALLOW_EPHEMERAL_KEYS=false` 时未提供签名私钥
+- `database schema is not initialized`
+  - 数据库还没有执行迁移；源码启动执行 `alembic upgrade head`，Docker 部署执行 `docker compose run --rm app alembic upgrade head`
 - `401 Unauthorized` on `/oidc/token`
   - 通常表示客户端认证失败，应检查 Basic Auth 或表单中的 `client_id` / `client_secret`
 
@@ -274,6 +353,7 @@ curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
 ```bash
 git pull
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 ```
 
@@ -319,12 +399,16 @@ OIDC__REDIRECT_URI=https://coze.example.com/oidc/callback
 
 REDIS__HOST=127.0.0.1
 REDIS__PORT=6379
-REDIS__PASSWORD=
+REDIS__PASSWORD=dingbridge_redis_password
+
+DATABASE__URL=sqlite:///./dingbridge.sqlite3
 
 SECURITY__ALLOW_EPHEMERAL_KEYS=true
 ```
 
 公开部署必须注入稳定 RSA 私钥，不要使用临时密钥。
+
+如果源码启动时准备接 MySQL，把 `DATABASE__URL` 改成例如 `mysql+pymysql://dingbridge:change_me@127.0.0.1:3306/dingbridge?charset=utf8mb4`。
 
 #### 3. 启动依赖服务
 
@@ -332,7 +416,13 @@ SECURITY__ALLOW_EPHEMERAL_KEYS=true
 docker compose up -d redis
 ```
 
-#### 4. 启动 DingBridge
+#### 4. 初始化或升级数据库 schema
+
+```bash
+alembic upgrade head
+```
+
+#### 5. 启动 DingBridge
 
 ```bash
 uvicorn app.main:app --reload
@@ -351,6 +441,7 @@ uvicorn app.main:app --reload
 ```bash
 cp .env.example .env
 docker build -t dingbridge:latest .
+DINGBRIDGE_IMAGE=dingbridge:latest docker compose run --rm app alembic upgrade head
 DINGBRIDGE_IMAGE=dingbridge:latest docker compose up -d
 ```
 
@@ -385,6 +476,7 @@ Admin:
 - `PUT /admin/idp-settings`：更新当前 IdP 配置，需 `x-admin-key`
 - `GET /admin/dingtalk-apps`：列出钉钉应用配置，需 `x-admin-key`
 - `POST /admin/dingtalk-apps`：创建或更新钉钉应用配置，需 `x-admin-key`
+- `GET /admin/console/oidc-clients`：OIDC Client 管理页
 - `GET /admin/oidc-clients`：列出 OIDC 客户端配置，需 `x-admin-key`
 - `POST /admin/oidc-clients`：创建或更新 OIDC 客户端配置，需 `x-admin-key`
 - `POST /admin/reload`：刷新运行时配置缓存，需 `x-admin-key`
@@ -407,12 +499,15 @@ git push origin v0.1.0
 推送 `v*` tag 后，GitHub Actions 会：
 
 - 创建 GitHub Release（源码归档由 GitHub 自动附带）
-- 构建并推送 Docker 镜像到 `ghcr.io/finnyuan9527/dingbridge`
-- 更新推荐部署镜像标签 `ghcr.io/finnyuan9527/dingbridge:latest`
+- 构建并推送 Docker 镜像到 `ghcr.io/<repository-owner>/dingbridge`
+- 更新该仓库命名空间下的 `latest` 镜像标签
+
+本仓库的官方镜像地址是 `ghcr.io/finnyuan9527/dingbridge`。如果你在 fork 或组织仓库中发布，镜像地址会使用对应的 repository owner。
 
 ### 项目结构
 
 ```text
+alembic/        Database schema migrations
 app/
   routers/      HTTP routes for OIDC, DingTalk, and admin APIs
   services/     Authentication, token, session, config, and DingTalk logic
@@ -425,10 +520,6 @@ tests/          Automated tests
 
 ### 路线图
 
-- 完善 OIDC 兼容性测试
-- 增强钉钉组织和部门字段映射
-- 增加配置迁移机制
-- 增加结构化审计日志落库
 - 增加部署和监控建议
 
 ### 贡献
@@ -508,7 +599,9 @@ cd dingbridge
 cp .env.example .env
 # Edit .env and fill in the basic DingTalk / OIDC settings
 # For temporary local validation, you can start with SECURITY__ALLOW_EPHEMERAL_KEYS=true
+# Docker stores the default SQLite database in the Compose volume at /data; for production, prefer MySQL
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 curl http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/.well-known/openid-configuration
@@ -525,6 +618,7 @@ git clone https://github.com/finnyuan9527/dingbridge.git
 cd dingbridge
 cp .env.example .env
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 ```
 
@@ -571,6 +665,12 @@ OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
 # Redis password
 REDIS__PASSWORD=replace_with_a_strong_password
 
+# Database
+# Docker defaults to persistent SQLite in a named volume for single-node deployments
+DATABASE__URL=sqlite:////data/dingbridge.sqlite3
+# MySQL is recommended for production
+# DATABASE__URL=mysql+pymysql://dingbridge:change_me@mysql:3306/dingbridge?charset=utf8mb4
+
 # Admin API key
 SECURITY__ADMIN_API_KEY=replace_with_a_strong_admin_key
 
@@ -611,25 +711,93 @@ openssl genrsa -out certs/jwt_private.pem 2048
 openssl rsa -in certs/jwt_private.pem -pubout -out certs/jwt_public.pem
 ```
 
-5. Pull the image and start the stack:
+5. Pull the image:
 
 ```bash
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+```
+
+6. Initialize or upgrade the database schema:
+
+```bash
+docker compose run --rm app alembic upgrade head
+```
+
+The default Docker setup stores the SQLite database in the Compose `dingbridge_data` volume, so the migration result persists across container restarts. For production, it is still better to point `DATABASE__URL` at an external MySQL instance.
+
+7. Start the stack:
+
+```bash
 docker compose up -d
 ```
 
-6. Check whether the containers are healthy:
+8. Check whether the containers are healthy:
 
 ```bash
 docker compose ps
 docker compose logs -f app
 ```
 
-7. Verify the application is reachable:
+9. Verify the application is reachable:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
 ```
+
+#### Admin Console
+
+The current version includes a minimal OIDC Client admin page so you can create and maintain multiple client configurations after the service is up.
+
+Access URL:
+
+- Local default address for Docker or source startup: `http://127.0.0.1:8000/admin/console/oidc-clients`
+- Public deployment address: `https://your-domain.example.com/admin/console/oidc-clients`
+
+Prerequisites:
+
+- `SECURITY__ADMIN_API_KEY` must be set in `.env`
+- The page does not create a separate login session. Instead, you enter `x-admin-key` in the page and the browser calls the Admin APIs directly
+- Because the page operates on `/admin/oidc-clients` and `/admin/dingtalk-apps`, expose it only behind a trusted internal network, bastion host, or restricted reverse proxy
+
+Recommended flow:
+
+1. Open `/admin/console/oidc-clients`
+2. Paste `SECURITY__ADMIN_API_KEY` into the `Admin API Key` field
+3. Click `Load Clients` to fetch the current OIDC client list and DingTalk app list
+4. Click `New Client` if you want to create a new client
+5. Fill in `client_id`, `name`, and `redirect_uris`
+6. `client_secret` is required when creating a client for the first time
+7. Select `dingtalk_app_id` if you want to bind the client to a specific DingTalk app
+8. Click `Save Client`
+
+Current behavior:
+
+- lists existing OIDC clients
+- creates new clients
+- edits `name`, `enabled`, `redirect_uris`, and `dingtalk_app_id`
+- keeps the existing secret unchanged when `client_secret` is left blank during updates
+- never shows the stored `client_secret`
+- does not provide delete actions yet; deletion should be designed later with audit and permission controls
+- currently manages OIDC clients only; DingTalk apps are still managed through the Admin APIs
+
+#### Audit Logs
+
+The current version persists these security-relevant events into the `audit_logs` table:
+
+- `login_success`
+- `login_failure`
+- `token_issued`
+
+These events are still emitted to the normal logger as well. There is no audit log UI or query API yet, so for now you should inspect the database directly, for example:
+
+```sql
+SELECT id, event, client_id, user_sub, created_at
+FROM audit_logs
+ORDER BY id DESC
+LIMIT 20;
+```
+
+With the default Docker SQLite deployment, the database file is `/data/dingbridge.sqlite3` inside the application container. If you use MySQL, query the database pointed to by `DATABASE__URL` with your MySQL client.
 
 #### Testing With oidcdebugger.com
 
@@ -695,6 +863,8 @@ Notes:
   - the `client_id` / `client_secret` pair is incorrect
 - `missing SECURITY__JWT_PRIVATE_KEY or SECURITY__JWT_PRIVATE_KEY_PATH`
   - a signing private key is required when `SECURITY__ALLOW_EPHEMERAL_KEYS=false`
+- `database schema is not initialized`
+  - the database has not been migrated yet; run `alembic upgrade head` for source startup, or `docker compose run --rm app alembic upgrade head` for Docker deployment
 - `401 Unauthorized` on `/oidc/token`
   - usually indicates failed client authentication; check Basic Auth or the submitted `client_id` / `client_secret`
 
@@ -712,6 +882,7 @@ If you already have the repository locally and just want to update to a newer im
 ```bash
 git pull
 docker pull ghcr.io/finnyuan9527/dingbridge:latest
+docker compose run --rm app alembic upgrade head
 docker compose up -d
 ```
 
@@ -757,12 +928,16 @@ OIDC__REDIRECT_URI=https://coze.example.com/oidc/callback
 
 REDIS__HOST=127.0.0.1
 REDIS__PORT=6379
-REDIS__PASSWORD=
+REDIS__PASSWORD=dingbridge_redis_password
+
+DATABASE__URL=sqlite:///./dingbridge.sqlite3
 
 SECURITY__ALLOW_EPHEMERAL_KEYS=true
 ```
 
 Public deployments must use a stable RSA private key. Do not use ephemeral keys for deployed services.
+
+If you want to run from source with MySQL instead of local SQLite, replace `DATABASE__URL` with a DSN such as `mysql+pymysql://dingbridge:change_me@127.0.0.1:3306/dingbridge?charset=utf8mb4`.
 
 #### 3. Start Redis
 
@@ -770,7 +945,13 @@ Public deployments must use a stable RSA private key. Do not use ephemeral keys 
 docker compose up -d redis
 ```
 
-#### 4. Start DingBridge
+#### 4. Initialize or upgrade the database schema
+
+```bash
+alembic upgrade head
+```
+
+#### 5. Start DingBridge
 
 ```bash
 uvicorn app.main:app --reload
@@ -789,6 +970,7 @@ If you prefer to build an image from the current source tree yourself:
 ```bash
 cp .env.example .env
 docker build -t dingbridge:latest .
+DINGBRIDGE_IMAGE=dingbridge:latest docker compose run --rm app alembic upgrade head
 DINGBRIDGE_IMAGE=dingbridge:latest docker compose up -d
 ```
 
@@ -823,6 +1005,7 @@ Admin:
 - `PUT /admin/idp-settings`: update current IdP settings, requires `x-admin-key`
 - `GET /admin/dingtalk-apps`: list DingTalk app configs, requires `x-admin-key`
 - `POST /admin/dingtalk-apps`: create or update DingTalk app configs, requires `x-admin-key`
+- `GET /admin/console/oidc-clients`: OIDC client admin page
 - `GET /admin/oidc-clients`: list OIDC client configs, requires `x-admin-key`
 - `POST /admin/oidc-clients`: create or update OIDC client configs, requires `x-admin-key`
 - `POST /admin/reload`: refresh runtime config caches, requires `x-admin-key`
@@ -845,12 +1028,15 @@ git push origin v0.1.0
 When a `v*` tag is pushed, GitHub Actions will:
 
 - create a GitHub Release, with source archives automatically provided by GitHub
-- build and push the Docker image to `ghcr.io/finnyuan9527/dingbridge`
-- refresh the recommended deployment tag `ghcr.io/finnyuan9527/dingbridge:latest`
+- build and push the Docker image to `ghcr.io/<repository-owner>/dingbridge`
+- refresh the `latest` image tag in that repository namespace
+
+The official image for this repository is `ghcr.io/finnyuan9527/dingbridge`. Forks and organization repositories publish under their own repository owner.
 
 ### Project Structure
 
 ```text
+alembic/        Database schema migrations
 app/
   routers/      HTTP routes for OIDC, DingTalk, and admin APIs
   services/     Authentication, token, session, config, and DingTalk logic
@@ -863,10 +1049,6 @@ tests/          Automated tests
 
 ### Roadmap
 
-- Expand OIDC compatibility tests
-- Improve DingTalk organization and department mappings
-- Add database migration support
-- Persist structured audit logs
 - Add deployment and monitoring examples
 
 ### Contributing

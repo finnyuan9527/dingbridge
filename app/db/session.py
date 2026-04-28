@@ -23,9 +23,12 @@ def get_engine() -> Engine:
     return _engine
 
 
-def create_all() -> None:
-    engine = get_engine()
-    Base.metadata.create_all(bind=engine)
+def reset_engine() -> None:
+    global _engine, _SessionLocal
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _SessionLocal = None
 
 
 @contextmanager

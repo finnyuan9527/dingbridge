@@ -97,7 +97,7 @@ async def authorize(
     redirect_url = oidc_store.build_redirect_uri_with_params(redirect_uri, params, fragment=False)
 
     ip = request.client.host if request.client else None
-    audit.log_login_success(
+    await audit.log_login_success_async(
         user=user,
         source="oidc_authorize",
         client_id=client_id,
@@ -198,7 +198,7 @@ async def token(
     id_token = token_service.create_id_token(user, client_id=client_id, nonce=nonce)
 
     ip = request.client.host if request.client else None
-    audit.log_token_issued(
+    await audit.log_token_issued_async(
         user=user,
         client_id=client_id,
         scope=scope,

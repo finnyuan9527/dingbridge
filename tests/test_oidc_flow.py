@@ -266,6 +266,30 @@ class OIDCFlowTests(unittest.TestCase):
         self.assertIn("code=", location)
         self.assertIn("state=st-abc", location)
 
+    def test_authorize_ignores_form_post_and_still_redirects_with_query_params(self):
+        session_id = "sid-auth-form-post"
+        asyncio.run(
+            session_service.create_session(
+                session_id,
+                User(subject="u-form-post", name="Form Post User"),
+            )
+        )
+        self.client.cookies.set("dingbridge_sso", session_id)
+
+        verifier = "flow-verifier-form-post"
+        params = self._authorize_params(
+            code_challenge=_pkce_s256(verifier),
+            state="st-form-post",
+            response_mode="form_post",
+        )
+        resp = self.client.get("/oidc/authorize", params=params, follow_redirects=False)
+
+        self.assertEqual(resp.status_code, 302)
+        location = resp.headers["location"]
+        self.assertIn("https://client.example/callback", location)
+        self.assertIn("code=", location)
+        self.assertIn("state=st-form-post", location)
+
     # ------------------------------------------------------------------
     # /oidc/token — authorization_code grant
     # ------------------------------------------------------------------
@@ -303,6 +327,53 @@ class OIDCFlowTests(unittest.TestCase):
         self.assertIn("refresh_token", data)
         self.assertEqual(data["token_type"], "Bearer")
         self.assertIn("expires_in", data)
+
+    def test_token_supports_client_secret_post(self):
+        verifier = "tok-verifier-post"
+        code = self._issue_code(verifier)
+        resp = self.client.post(
+            "/oidc/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": "https://client.example/callback",
+                "code_verifier": verifier,
+                "client_id": "test-client",
+                "client_secret": "test-secret",
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertIn("access_token", resp.json())
+
+    def test_token_rejects_missing_redirect_uri_for_authorization_code(self):
+        verifier = "tok-verifier-no-redirect"
+        code = self._issue_code(verifier)
+        resp = self.client.post(
+            "/oidc/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "code_verifier": verifier,
+            },
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "invalid_request")
+
+    def test_token_rejects_missing_code_verifier_when_pkce_was_used(self):
+        verifier = "tok-verifier-missing-pkce"
+        code = self._issue_code(verifier)
+        resp = self.client.post(
+            "/oidc/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": "https://client.example/callback",
+            },
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "invalid_request")
 
     def test_token_rejects_invalid_pkce_verifier(self):
         verifier = "tok-verifier-2"
@@ -426,6 +497,66 @@ class OIDCFlowTests(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data.get("email"), "info@example.com")
         self.assertEqual(data.get("phone_number"), "+861234567890")
+
+    # ------------------------------------------------------------------
+    # /oidc/logout — 互操作与 redirect 校验
+    # ------------------------------------------------------------------
+
+    def test_logout_redirects_with_state_when_post_logout_redirect_uri_is_valid(self):
+        resp = self.client.post(
+            "/oidc/logout",
+            data={
+                "client_id": "test-client",
+                "post_logout_redirect_uri": "https://client.example/callback",
+                "state": "logout-state-1",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("https://client.example/callback", resp.headers["location"])
+        self.assertIn("state=logout-state-1", resp.headers["location"])
+
+    def test_logout_rejects_invalid_post_logout_redirect_uri(self):
+        resp = self.client.post(
+            "/oidc/logout",
+            data={
+                "client_id": "test-client",
+                "post_logout_redirect_uri": "https://evil.example/logout",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "invalid_post_logout_redirect_uri")
+
+    def test_logout_resolves_client_from_id_token_hint(self):
+        user = User(subject="u-logout-hint", name="Logout Hint User")
+        id_token_hint = token_service.create_id_token(
+            user,
+            client_id="test-client",
+            nonce="logout-nonce",
+        )
+        resp = self.client.post(
+            "/oidc/logout",
+            data={
+                "id_token_hint": id_token_hint,
+                "post_logout_redirect_uri": "https://client.example/callback",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("https://client.example/callback", resp.headers["location"])
+
+    def test_logout_rejects_invalid_id_token_hint(self):
+        resp = self.client.post(
+            "/oidc/logout",
+            data={
+                "id_token_hint": "not-a-jwt",
+                "post_logout_redirect_uri": "https://client.example/callback",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get("detail"), "invalid_id_token_hint")
 
 
 if __name__ == "__main__":

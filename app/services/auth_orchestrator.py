@@ -26,7 +26,7 @@ async def ensure_user_session_via_dingtalk(
     user = await session_service.get_user_by_session(session_id)
     if user:
         ip = request.client.host if request.client else None
-        audit.log_login_success(
+        await audit.log_login_success_async(
             user=user,
             source="session",
             client_id=None,

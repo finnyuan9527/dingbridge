@@ -7,7 +7,7 @@ from pydantic import AnyHttpUrl, BaseModel
 from sqlalchemy import select
 
 from app.config import settings
-from app.db import create_all, get_session
+from app.db import get_session
 from app.db.models import DingTalkAppORM, IdPSettingsORM, OIDCClientORM
 
 
@@ -28,7 +28,6 @@ class DingTalkApp(BaseModel):
 
 
 def seed_defaults_if_needed() -> None:
-    create_all()
     with get_session() as db:
         idp = db.get(IdPSettingsORM, 1)
         if idp is None:
