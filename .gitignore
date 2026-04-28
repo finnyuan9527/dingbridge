@@ -24,6 +24,9 @@ certs/
 *.sqlite3
 *.db
 
+# Local planning artifacts
+docs/superpowers/
+
 # IDE
 .vscode/
 .idea/
