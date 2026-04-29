@@ -526,9 +526,23 @@ tests/          Automated tests
 
 ### 路线图
 
-- 部署和监控示例：反向代理、健康检查、日志采集、MySQL 生产部署建议
-- 审计日志查询能力：查询 API、分页、筛选和导出
-- 更多部署形态：Kubernetes、systemd、外部 Redis/MySQL 示例
+近期重点：
+
+- 生产部署示例：Nginx/Caddy 反向代理、HTTPS/TLS、外部 MySQL/Redis、备份恢复和版本升级流程
+- 可观测性增强：拆分 liveness/readiness、数据库连通性检查、结构化日志和基础运行指标
+- Admin Console 增强：OIDC Client 删除、client secret 轮换、redirect URI 管理体验优化和操作审计展示
+
+中期方向：
+
+- 安全增强：Admin API 限流、OIDC authorize/token 接口限流、JWT 多 key 与 `kid` 轮换、client secret 哈希存储
+- 审计日志查询能力：查询 API、分页、筛选、导出和保留策略建议
+- OIDC 兼容性：补充 Coze、oidcdebugger、Postman 等接入示例和常见错误排查矩阵
+
+后续版本：
+
+- 更多部署形态：Kubernetes、systemd、Helm Chart 和云平台部署样例
+- 开源项目治理：Issue 模板、PR 模板、Release checklist 和安全发布检查
+- DingTalk App 管理页：保留为后续版本评估项，当前版本仍优先通过 Admin API 管理
 
 更细的需求和优先级建议通过 GitHub Issues 跟踪。
 
@@ -1065,9 +1079,23 @@ tests/          Automated tests
 
 ### Roadmap
 
-- Deployment and monitoring examples: reverse proxy, health checks, log collection, and MySQL production guidance
-- Audit log query capability: API access, pagination, filtering, and export
-- More deployment shapes: Kubernetes, systemd, external Redis/MySQL examples
+Near-term priorities:
+
+- Production deployment examples: Nginx/Caddy reverse proxy, HTTPS/TLS, external MySQL/Redis, backup/restore, and upgrade procedures
+- Observability improvements: separate liveness/readiness checks, database connectivity checks, structured logs, and basic runtime metrics
+- Admin Console improvements: OIDC client deletion, client secret rotation, redirect URI management UX, and audit trail display
+
+Mid-term direction:
+
+- Security hardening: Admin API rate limiting, OIDC authorize/token rate limiting, multiple JWT keys with `kid` rotation, and hashed client secret storage
+- Audit log query capability: API access, pagination, filtering, export, and retention guidance
+- OIDC compatibility: more examples for Coze, oidcdebugger, Postman, and a troubleshooting matrix for common errors
+
+Later versions:
+
+- More deployment shapes: Kubernetes, systemd, Helm Chart, and cloud deployment examples
+- Open-source project governance: issue templates, pull request templates, release checklist, and secure release checks
+- DingTalk App admin page: kept as a later evaluation item; the current version continues to manage DingTalk apps through the Admin APIs
 
 Detailed requests and priorities should be tracked through GitHub Issues.
 
