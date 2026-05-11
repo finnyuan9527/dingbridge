@@ -106,6 +106,15 @@ class OIDCFlowTests(unittest.TestCase):
                     name="test",
                     enabled=True,
                 )
+            if client_id == "qoder-client-id":
+                return OIDCClient(
+                    client_id="qoder-client-id",
+                    client_secret="qoder-secret",
+                    redirect_uris=["https://qoder.com/sso/callback/oidc/test-team"],
+                    name="qoder",
+                    enabled=True,
+                    require_pkce=False,
+                )
             return None
 
         cls._patch_oidc_client = patch(
@@ -200,12 +209,26 @@ class OIDCFlowTests(unittest.TestCase):
         base.update(overrides)
         return base
 
-    def test_authorize_rejects_missing_pkce(self):
+    def test_authorize_rejects_missing_pkce_by_default(self):
         params = self._authorize_params()
         del params["code_challenge"]
+        del params["code_challenge_method"]
         resp = self.client.get("/oidc/authorize", params=params, follow_redirects=False)
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json().get("detail"), "invalid_request")
+
+    def test_authorize_allows_client_with_pkce_disabled_without_pkce(self):
+        params = self._authorize_params(
+            client_id="qoder-client-id",
+            redirect_uri="https://qoder.com/sso/callback/oidc/test-team",
+        )
+        del params["code_challenge"]
+        del params["code_challenge_method"]
+        params["prompt"] = "login"
+        params["access_type"] = "code"
+        resp = self.client.get("/oidc/authorize", params=params, follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/dingtalk/login", resp.headers["location"])
 
     def test_authorize_rejects_plain_pkce_method(self):
         params = self._authorize_params(code_challenge_method="plain")
@@ -375,6 +398,33 @@ class OIDCFlowTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json().get("detail"), "invalid_request")
 
+    def test_token_authorization_code_without_pkce_success(self):
+        code = asyncio.run(
+            oidc_store.issue_code(
+                client_id="test-client",
+                redirect_uri="https://client.example/callback",
+                scope="openid profile email",
+                user=User(subject="u-token-no-pkce", name="No PKCE User"),
+                nonce="nonce-no-pkce",
+                code_challenge=None,
+                code_challenge_method=None,
+            )
+        )
+        resp = self.client.post(
+            "/oidc/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": "https://client.example/callback",
+            },
+            headers=self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()
+        self.assertIn("access_token", data)
+        self.assertIn("id_token", data)
+        self.assertIn("refresh_token", data)
+
     def test_token_rejects_invalid_pkce_verifier(self):
         verifier = "tok-verifier-2"
         code = self._issue_code(verifier)
@@ -469,7 +519,17 @@ class OIDCFlowTests(unittest.TestCase):
 
     def test_userinfo_rejects_invalid_token(self):
         resp = self.client.get("/oidc/userinfo", headers={"Authorization": "Bearer invalid.token.here"})
-        self.assertEqual(resp.status_code, 500)  # jose 抛出异常，FastAPI 默认返回 500
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json().get("detail"), "invalid_token")
+
+    def test_userinfo_does_not_mask_server_verification_failures(self):
+        with patch(
+            "app.services.token_service.decode_and_verify_bearer",
+            side_effect=RuntimeError("broken signing key configuration"),
+        ):
+            resp = self.client.get("/oidc/userinfo", headers={"Authorization": "Bearer any-token"})
+
+        self.assertEqual(resp.status_code, 500)
 
     def test_userinfo_returns_sub_only_for_openid_scope(self):
         token = self._get_access_token(scope="openid")

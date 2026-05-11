@@ -44,6 +44,7 @@ class AdminConsoleTests(unittest.TestCase):
         self.assertIn("client_id", resp.text)
         self.assertIn("client_secret", resp.text)
         self.assertIn("redirect_uris", resp.text)
+        self.assertIn("require_pkce", resp.text)
         self.assertIn("dingtalk_app_id", resp.text)
 
     def test_oidc_client_console_page_references_static_assets(self):
@@ -62,6 +63,12 @@ class AdminConsoleTests(unittest.TestCase):
         script = Path("app/static/admin/oidc_clients.js").read_text(encoding="utf-8")
         self.assertIn("clientIdEl.readOnly = isEditing;", script)
         self.assertIn("payloadClientId = editingClientId || clientIdEl.value.trim();", script)
+
+    def test_oidc_client_console_script_handles_require_pkce(self):
+        script = Path("app/static/admin/oidc_clients.js").read_text(encoding="utf-8")
+        self.assertIn('document.getElementById("require_pkce")', script)
+        self.assertIn("requirePkceEl.checked = client.require_pkce !== false;", script)
+        self.assertIn("require_pkce: requirePkceEl.checked", script)
 
     def test_oidc_client_console_page_uses_control_bar_layout(self):
         resp = self.client.get("/admin/console/oidc-clients")

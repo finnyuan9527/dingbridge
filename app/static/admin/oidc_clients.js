@@ -13,6 +13,7 @@ const nameEl = document.getElementById("name");
 const clientSecretEl = document.getElementById("client_secret");
 const redirectUrisEl = document.getElementById("redirect_uris");
 const enabledEl = document.getElementById("enabled");
+const requirePkceEl = document.getElementById("require_pkce");
 
 let currentClients = [];
 let editingClientId = null;
@@ -46,7 +47,7 @@ function createCell(text, className) {
 function createEmptyStateRow(message) {
   const row = document.createElement("tr");
   const cell = createCell(message, "muted");
-  cell.colSpan = 5;
+  cell.colSpan = 6;
   row.appendChild(cell);
   return row;
 }
@@ -55,6 +56,7 @@ function resetForm() {
   form.reset();
   editingClientId = null;
   enabledEl.checked = true;
+  requirePkceEl.checked = true;
   appSelectEl.value = "";
   editorModeEl.textContent = "Create or update a client";
   setEditingState(false);
@@ -67,6 +69,7 @@ function populateForm(client) {
   clientSecretEl.value = "";
   redirectUrisEl.value = (client.redirect_uris || []).join("\n");
   enabledEl.checked = Boolean(client.enabled);
+  requirePkceEl.checked = client.require_pkce !== false;
   appSelectEl.value = client.dingtalk_app_id == null ? "" : String(client.dingtalk_app_id);
   editorModeEl.textContent = "Editing " + client.client_id;
   setEditingState(true);
@@ -107,6 +110,7 @@ function renderClients(clients) {
     row.appendChild(buttonCell);
     row.appendChild(createCell(client.name || "-"));
     row.appendChild(createCell(client.enabled ? "true" : "false"));
+    row.appendChild(createCell(client.require_pkce === false ? "false" : "true"));
     row.appendChild(createCell(String(appId)));
     row.appendChild(redirectUrisCell);
     fragment.appendChild(row);
@@ -174,6 +178,7 @@ form.addEventListener("submit", async (event) => {
       name: nameEl.value.trim(),
       enabled: enabledEl.checked,
       redirect_uris: redirectUrisEl.value.split(/\n+/).map((item) => item.trim()).filter(Boolean),
+      require_pkce: requirePkceEl.checked,
       dingtalk_app_id: appSelectEl.value === "" ? null : Number(appSelectEl.value),
     };
     const secret = clientSecretEl.value.trim();

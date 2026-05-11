@@ -240,14 +240,15 @@ curl http://127.0.0.1:8000/healthz
 4. 如需新增客户端，点击 `New Client`
 5. 填写 `client_id`、`name`、`redirect_uris`
 6. 首次创建时必须填写 `client_secret`
-7. 如需绑定指定钉钉应用，可选择 `dingtalk_app_id`
-8. 点击 `Save Client`
+7. 默认保持 `require_pkce` 开启；只有接入方明确不支持 PKCE、且会在 `/oidc/token` 使用 `client_secret` 的 confidential client，才建议关闭
+8. 如需绑定指定钉钉应用，可选择 `dingtalk_app_id`
+9. 点击 `Save Client`
 
 当前管理页行为说明：
 
 - 支持列出已有 OIDC Client
 - 支持新建客户端
-- 支持编辑 `name`、`enabled`、`redirect_uris`、`dingtalk_app_id`
+- 支持编辑 `name`、`enabled`、`redirect_uris`、`require_pkce`、`dingtalk_app_id`
 - 更新已有客户端时，`client_secret` 留空表示保持原值不变
 - 当前版本不会回显已有 `client_secret`
 - 当前版本不提供删除按钮；如需删除能力，建议后续配合审计和权限控制单独设计
@@ -294,7 +295,8 @@ curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
     "name": "OIDC Debugger Test",
     "enabled": true,
     "client_secret": "replace-with-a-temporary-secret",
-    "redirect_uris": ["https://oidcdebugger.com/debug"]
+    "redirect_uris": ["https://oidcdebugger.com/debug"],
+    "require_pkce": true
   }'
 ```
 
@@ -315,7 +317,8 @@ curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
 注意事项：
 
 - 不要把生产环境 client secret 或长期使用的 secret 输入第三方网站；联调结束后应删除测试 client 或轮换其 secret
-- 当前实现强制要求 PKCE；如果缺少 `code_challenge` 或 `code_challenge_method` 不是 `S256`，`/oidc/authorize` 会直接返回 `400`
+- 默认情况下每个 OIDC Client 都要求 PKCE；如果该客户端的 `require_pkce=true`，缺少 `code_challenge` 或 `code_challenge_method` 不是 `S256` 时，`/oidc/authorize` 会直接返回 `400`
+- 仅当接入方是 confidential client 且确实不支持 PKCE 时，才应把该客户端的 `require_pkce` 显式设为 `false`；此时 `/oidc/token` 仍必须使用正确的 `client_secret` 换取 token
 - `redirect_uri` 只要不在客户端白名单内，就会返回 `invalid_redirect_uri`
 - 目前更稳妥的联调方式是使用默认 query redirect 流程；如果第三方工具强依赖 `response_mode=form_post`，需要额外确认兼容性
 
@@ -793,14 +796,15 @@ Recommended flow:
 4. Click `New Client` if you want to create a new client
 5. Fill in `client_id`, `name`, and `redirect_uris`
 6. `client_secret` is required when creating a client for the first time
-7. Select `dingtalk_app_id` if you want to bind the client to a specific DingTalk app
-8. Click `Save Client`
+7. Keep `require_pkce` enabled by default; disable it only for a confidential client whose upstream application does not support PKCE and will authenticate at `/oidc/token` with `client_secret`
+8. Select `dingtalk_app_id` if you want to bind the client to a specific DingTalk app
+9. Click `Save Client`
 
 Current behavior:
 
 - lists existing OIDC clients
 - creates new clients
-- edits `name`, `enabled`, `redirect_uris`, and `dingtalk_app_id`
+- edits `name`, `enabled`, `redirect_uris`, `require_pkce`, and `dingtalk_app_id`
 - keeps the existing secret unchanged when `client_secret` is left blank during updates
 - never shows the stored `client_secret`
 - does not provide delete actions yet; deletion should be designed later with audit and permission controls
@@ -847,7 +851,8 @@ curl -X POST 'https://your-domain.example.com/admin/oidc-clients' \
     "name": "OIDC Debugger Test",
     "enabled": true,
     "client_secret": "replace-with-a-temporary-secret",
-    "redirect_uris": ["https://oidcdebugger.com/debug"]
+    "redirect_uris": ["https://oidcdebugger.com/debug"],
+    "require_pkce": true
   }'
 ```
 
@@ -868,7 +873,8 @@ Recommended values:
 Notes:
 
 - never paste a production client secret or any long-lived secret into a third-party site; after testing, delete the disposable client or rotate its secret
-- the current implementation requires PKCE; if `code_challenge` is missing or `code_challenge_method` is not `S256`, `/oidc/authorize` returns `400`
+- each OIDC client requires PKCE by default; when `require_pkce=true`, missing `code_challenge` or a `code_challenge_method` other than `S256` makes `/oidc/authorize` return `400`
+- set `require_pkce=false` only for a confidential client whose upstream application does not support PKCE; `/oidc/token` must still authenticate with the correct `client_secret`
 - if the `redirect_uri` is not in the client allowlist, the server returns `invalid_redirect_uri`
 - the safest interop path right now is the default query redirect flow; if a third-party debugger strictly requires `response_mode=form_post`, verify compatibility separately
 

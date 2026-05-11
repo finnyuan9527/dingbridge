@@ -191,6 +191,7 @@ class OIDCClientUpsert(BaseModel):
     enabled: bool = True
     client_secret: Optional[str] = None
     redirect_uris: list[AnyHttpUrl]
+    require_pkce: bool = True
     dingtalk_app_id: Optional[int] = None
 
 
@@ -199,6 +200,7 @@ class OIDCClientOut(BaseModel):
     name: str
     enabled: bool
     redirect_uris: list[AnyHttpUrl]
+    require_pkce: bool
     dingtalk_app_id: Optional[int] = None
 
 
@@ -211,6 +213,7 @@ def _list_oidc_clients_sync():
                 name=r.name,
                 enabled=r.enabled,
                 redirect_uris=[u for u in (r.redirect_uris or [])],
+                require_pkce=r.require_pkce,
                 dingtalk_app_id=r.dingtalk_app_id,
             )
             for r in rows
@@ -235,6 +238,7 @@ def _upsert_oidc_client_sync(payload: OIDCClientUpsert):
                 enabled=payload.enabled,
                 client_secret=payload.client_secret,
                 redirect_uris=[str(u) for u in payload.redirect_uris],
+                require_pkce=payload.require_pkce,
                 dingtalk_app_id=payload.dingtalk_app_id,
             )
             db.add(row)
@@ -242,6 +246,7 @@ def _upsert_oidc_client_sync(payload: OIDCClientUpsert):
             row.name = payload.name
             row.enabled = payload.enabled
             row.redirect_uris = [str(u) for u in payload.redirect_uris]
+            row.require_pkce = payload.require_pkce
             row.dingtalk_app_id = payload.dingtalk_app_id
             if payload.client_secret is not None:
                 row.client_secret = payload.client_secret
@@ -252,6 +257,7 @@ def _upsert_oidc_client_sync(payload: OIDCClientUpsert):
         name=row.name,
         enabled=row.enabled,
         redirect_uris=[u for u in (row.redirect_uris or [])],
+        require_pkce=row.require_pkce,
         dingtalk_app_id=row.dingtalk_app_id,
     )
 

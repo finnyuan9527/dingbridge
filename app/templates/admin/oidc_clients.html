@@ -89,6 +89,10 @@
               <input id="enabled" name="enabled" type="checkbox" checked />
               enabled
             </label>
+            <label class="checkbox checkbox--framed" for="require_pkce">
+              <input id="require_pkce" name="require_pkce" type="checkbox" checked />
+              require_pkce
+            </label>
           </div>
         </section>
 
@@ -122,12 +126,13 @@
                 <th>client_id</th>
                 <th>name</th>
                 <th>enabled</th>
+                <th>require_pkce</th>
                 <th>dingtalk_app_id</th>
                 <th>redirect_uris</th>
               </tr>
             </thead>
             <tbody id="client-rows">
-              <tr><td colspan="5" class="muted">Load clients to edit an existing OIDC client.</td></tr>
+              <tr><td colspan="6" class="muted">Load clients to edit an existing OIDC client.</td></tr>
             </tbody>
           </table>
         </div>

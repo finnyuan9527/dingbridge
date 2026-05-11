@@ -51,6 +51,7 @@ class OIDCClientORM(Base):
 
     client_secret: Mapped[str] = mapped_column(Text, nullable=False)
     redirect_uris: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    require_pkce: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     dingtalk_app_id: Mapped[Optional[int]] = mapped_column(ForeignKey("dingtalk_apps.id"), nullable=True)
     dingtalk_app: Mapped[Optional[DingTalkAppORM]] = relationship(back_populates="oidc_clients")

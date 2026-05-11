@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
+from jose.exceptions import JWTError
 from jose import jwt as jose_jwt
 
 from app.config import settings
@@ -64,10 +65,10 @@ async def authorize(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_scope")
     if response_type != "code":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported_response_type")
-    if not code_challenge:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_request")
-    if code_challenge_method != "S256":
+    if code_challenge and code_challenge_method != "S256":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_code_challenge_method")
+    if code_challenge_method and not code_challenge:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_request")
 
     # 校验 ClientID 和 RedirectURI
     client = client_registry.ClientRegistry.get_oidc_client(client_id)
@@ -76,6 +77,8 @@ async def authorize(
     
     if redirect_uri not in client.redirect_uris:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_redirect_uri")
+    if client.require_pkce and not code_challenge:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_request")
 
     user = await auth_orchestrator.ensure_user_session_via_dingtalk(request, client_id=client_id)
 
@@ -226,7 +229,10 @@ async def userinfo(request: Request) -> Dict[str, Any]:
     token = auth.split(" ", 1)[1].strip()
 
     audiences = client_registry.ClientRegistry.get_all_enabled_oidc_client_ids()
-    claims = token_service.decode_and_verify_bearer(token, audience=audiences)
+    try:
+        claims = token_service.decode_and_verify_bearer(token, audience=audiences)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_token")
     scope = str(claims.get("scope") or "")
     scopes = set(scope.split())
 

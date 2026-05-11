@@ -12,6 +12,7 @@ class OIDCClient(BaseModel):
     client_id: str
     client_secret: str
     redirect_uris: list[str]
+    require_pkce: bool = True
     name: str = ""
     enabled: bool = True
     dingtalk_app_id: int | None = None
@@ -57,6 +58,7 @@ class ClientRegistry:
                 client_id=settings.oidc.client_id,
                 client_secret=settings.oidc.client_secret,
                 redirect_uris=[str(settings.oidc.redirect_uri)],
+                require_pkce=True,
                 name="Default OIDC Client",
                 enabled=True,
                 dingtalk_app_id=None,

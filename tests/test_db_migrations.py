@@ -47,6 +47,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             oidc_clients = db.execute(select(OIDCClientORM)).scalars().all()
             self.assertEqual(len(oidc_clients), 1)
             self.assertEqual(oidc_clients[0].client_id, settings.oidc.client_id)
+            self.assertTrue(oidc_clients[0].require_pkce)
 
     def test_plain_alembic_config_uses_settings_database_url(self):
         default_db_path = Path(self.tmpdir.name) / "wrong-default.sqlite3"
