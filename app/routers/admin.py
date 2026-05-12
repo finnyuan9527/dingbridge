@@ -23,6 +23,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
+def _static_asset_url(url_path: str) -> str:
+    file_path = BASE_DIR / url_path.lstrip("/")
+    try:
+        version = file_path.stat().st_mtime_ns
+    except OSError:
+        return url_path
+    return f"{url_path}?v={version}"
+
+
 def _require_admin_key(x_admin_key: str | None):
     """校验 Admin API Key。
 
@@ -289,7 +298,7 @@ async def oidc_client_console(request: Request):
             "page_title": "OIDC Client Console",
             "oidc_clients_endpoint": "/admin/oidc-clients",
             "dingtalk_apps_endpoint": "/admin/dingtalk-apps",
-            "oidc_console_css": "/static/admin/oidc_clients.css",
-            "oidc_console_js": "/static/admin/oidc_clients.js",
+            "oidc_console_css": _static_asset_url("/static/admin/oidc_clients.css"),
+            "oidc_console_js": _static_asset_url("/static/admin/oidc_clients.js"),
         },
     )

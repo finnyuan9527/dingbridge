@@ -138,6 +138,9 @@ OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
 # Redis 密码
 REDIS__PASSWORD=replace_with_a_strong_password
 
+# 日志级别；排查钉钉登录/用户信息问题时可临时调成 DEBUG
+LOGGING__LEVEL=INFO
+
 # 数据库
 # Docker 默认使用持久化 SQLite volume，适合单机试用
 DATABASE__URL=sqlite:////data/dingbridge.sqlite3
@@ -693,6 +696,9 @@ OIDC__REDIRECT_URI=https://your-app.example.com/oidc/callback
 
 # Redis password
 REDIS__PASSWORD=replace_with_a_strong_password
+
+# Logging level; temporarily set this to DEBUG when diagnosing DingTalk login/user-info failures
+LOGGING__LEVEL=INFO
 
 # Database
 # Docker defaults to persistent SQLite in a named volume for single-node deployments

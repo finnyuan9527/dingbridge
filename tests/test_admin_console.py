@@ -52,6 +52,8 @@ class AdminConsoleTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertIn("/static/admin/oidc_clients.css", resp.text)
         self.assertIn("/static/admin/oidc_clients.js", resp.text)
+        self.assertIn("/static/admin/oidc_clients.css?v=", resp.text)
+        self.assertIn("/static/admin/oidc_clients.js?v=", resp.text)
 
     def test_oidc_client_console_script_builds_table_with_dom_nodes(self):
         script = Path("app/static/admin/oidc_clients.js").read_text(encoding="utf-8")

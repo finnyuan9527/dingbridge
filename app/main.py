@@ -7,10 +7,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette import status
 
 from app.db.migrations import ensure_schema_current
+from app.logging_config import configure_logging
 from app.routers import admin, dingtalk, oidc
 from app.services.auth_orchestrator import RequireLogin
 from app.services.cache import RedisManager
 from app.services.config_store import seed_defaults_if_needed
+
+
+configure_logging()
 
 
 @asynccontextmanager

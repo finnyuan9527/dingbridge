@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ from app.services.cache import get_redis
 from app.security import audit
 
 router = APIRouter(prefix="/dingtalk", tags=["dingtalk"])
+logger = logging.getLogger("dingbridge.dingtalk")
 
 
 def _is_safe_redirect_target(redirect: str, issuer: str) -> bool:
@@ -93,6 +95,14 @@ async def dingtalk_callback(request: Request, code: str, state: str):
             code, client_id=client_id, dingtalk_app_id=dingtalk_app_id
         )
     except Exception as e:
+        logger.debug(
+            "dingtalk_callback_failed client_id=%s dingtalk_app_id=%s reason=%s error=%r",
+            client_id,
+            dingtalk_app_id,
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
         ip = request.client.host if request.client else None
         await audit.log_login_failure_async(
             reason=type(e).__name__,

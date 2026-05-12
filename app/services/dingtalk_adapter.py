@@ -28,6 +28,10 @@ class DingTalkAPIError(RuntimeError):
     """
 
 
+def _presence_summary(data: Dict[str, Any], *fields: str) -> str:
+    return " ".join(f"has_{field}={bool(data.get(field))}" for field in fields)
+
+
 def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     """
     构造钉钉 OAuth 登录 URL。
@@ -76,13 +80,11 @@ async def fetch_access_token(app: DingTalkApp) -> str:
         data = resp.json()
         if data.get("errcode") != 0:
             logger.warning(
-                "dingtalk_app_token_failed",
-                extra={
-                    "event": "dingtalk_app_token_failed",
-                    "errcode": data.get("errcode"),
-                    "errmsg": data.get("errmsg"),
-                    "request_id": data.get("request_id"),
-                },
+                "dingtalk_app_token_failed errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+                extra={"event": "dingtalk_app_token_failed"},
             )
             raise DingTalkAPIError(
                 f"Failed to get dingtalk token: errcode={data.get('errcode')} errmsg={data.get('errmsg')} request_id={data.get('request_id')}"
@@ -117,13 +119,11 @@ def _fetch_app_access_token_sync(app: DingTalkApp) -> str:
         data = resp.json()
         if data.get("errcode") != 0:
             logger.warning(
-                "dingtalk_app_token_failed",
-                extra={
-                    "event": "dingtalk_app_token_failed",
-                    "errcode": data.get("errcode"),
-                    "errmsg": data.get("errmsg"),
-                    "request_id": data.get("request_id"),
-                },
+                "dingtalk_app_token_failed errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+                extra={"event": "dingtalk_app_token_failed"},
             )
             raise DingTalkAPIError(
                 f"Failed to get dingtalk token: errcode={data.get('errcode')} errmsg={data.get('errmsg')} request_id={data.get('request_id')}"
@@ -146,11 +146,18 @@ def _exchange_user_access_token(code: str, app: DingTalkApp) -> str:
     )
     try:
         token_response = oauth_client.get_user_token(token_request)
+        logger.debug("dingtalk_user_token_success")
         return token_response.body.access_token
     except Exception as e:
         logger.warning(
             "dingtalk_user_token_failed",
             extra={"event": "dingtalk_user_token_failed", "error_type": type(e).__name__},
+        )
+        logger.debug(
+            "dingtalk_user_token_failed error_type=%s error=%r",
+            type(e).__name__,
+            e,
+            exc_info=True,
         )
         raise DingTalkAPIError(f"SDK: Failed to get userAccessToken: {e}") from e
 
@@ -166,7 +173,7 @@ def _fetch_user_detail_via_sdk(user_access_token: str, app: DingTalkApp) -> Opti
     try:
         user_response = contact_client.get_user_with_options("me", headers, util_models.RuntimeOptions())
         body = user_response.body
-        return {
+        result = {
             "userid": body.open_id,
             "openId": body.open_id,
             "unionid": body.union_id,
@@ -176,6 +183,11 @@ def _fetch_user_detail_via_sdk(user_access_token: str, app: DingTalkApp) -> Opti
             "avatar": body.avatar_url,
             "state_code": body.state_code,
         }
+        logger.debug(
+            "dingtalk_user_detail_sdk_success %s",
+            _presence_summary(result, "openId", "unionid", "name", "email", "mobile"),
+        )
+        return result
     except Exception as e:
         logger.warning(
             "dingtalk_user_detail_sdk_failed",
@@ -183,6 +195,12 @@ def _fetch_user_detail_via_sdk(user_access_token: str, app: DingTalkApp) -> Opti
                 "event": "dingtalk_user_detail_sdk_failed",
                 "error_type": type(e).__name__,
             },
+        )
+        logger.debug(
+            "dingtalk_user_detail_sdk_failed error_type=%s error=%r",
+            type(e).__name__,
+            e,
+            exc_info=True,
         )
         return None
 
@@ -205,28 +223,41 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
             except Exception:
                 err = {"body": (resp.text or "")[:500]}
             logger.warning(
-                "dingtalk_user_basic_failed",
-                extra={
-                    "event": "dingtalk_user_basic_failed",
-                    "status_code": resp.status_code,
-                    "code": err.get("code"),
-                    "message": err.get("message"),
-                    "requestid": err.get("requestid") or err.get("request_id"),
-                },
+                "dingtalk_user_basic_failed status_code=%s code=%s message=%s requestid=%s",
+                resp.status_code,
+                err.get("code"),
+                err.get("message"),
+                err.get("requestid") or err.get("request_id"),
+                extra={"event": "dingtalk_user_basic_failed"},
+            )
+            logger.debug(
+                "dingtalk_user_basic_failed body=%r",
+                err,
             )
             resp.raise_for_status()
         data = resp.json()
-        return {
+        result = {
             "userid": data.get("openId"),
             "openId": data.get("openId"),
             "unionid": data.get("unionId"),
             "name": data.get("nick"),
             "avatar": data.get("avatarUrl"),
         }
+        logger.debug(
+            "dingtalk_user_basic_success %s",
+            _presence_summary(result, "openId", "unionid", "name"),
+        )
+        return result
     except Exception as e:
         logger.warning(
             "dingtalk_user_basic_exception",
             extra={"event": "dingtalk_user_basic_exception", "error_type": type(e).__name__},
+        )
+        logger.debug(
+            "dingtalk_user_basic_exception error_type=%s error=%r",
+            type(e).__name__,
+            e,
+            exc_info=True,
         )
         return None
 
@@ -244,17 +275,17 @@ def _get_userid_by_unionid_sync(app_access_token: str, union_id: str) -> Optiona
         data = resp.json()
         if data.get("errcode") != 0:
             logger.warning(
-                "dingtalk_get_userid_failed",
-                extra={
-                    "event": "dingtalk_get_userid_failed",
-                    "errcode": data.get("errcode"),
-                    "errmsg": data.get("errmsg"),
-                    "request_id": data.get("request_id"),
-                },
+                "dingtalk_get_userid_failed errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+                extra={"event": "dingtalk_get_userid_failed"},
             )
             return None
         result = data.get("result") or {}
-        return result.get("userid")
+        user_id = result.get("userid")
+        logger.debug("dingtalk_get_userid_success has_userid=%s", bool(user_id))
+        return user_id
 
 
 def _get_user_detail_by_userid_sync(app_access_token: str, user_id: str) -> Dict[str, Any]:
@@ -270,16 +301,19 @@ def _get_user_detail_by_userid_sync(app_access_token: str, user_id: str) -> Dict
         data = resp.json()
         if data.get("errcode") != 0:
             logger.warning(
-                "dingtalk_user_detail_oapi_failed",
-                extra={
-                    "event": "dingtalk_user_detail_oapi_failed",
-                    "errcode": data.get("errcode"),
-                    "errmsg": data.get("errmsg"),
-                    "request_id": data.get("request_id"),
-                },
+                "dingtalk_user_detail_oapi_failed errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+                extra={"event": "dingtalk_user_detail_oapi_failed"},
             )
             return {}
-        return data.get("result") or {}
+        result = data.get("result") or {}
+        logger.debug(
+            "dingtalk_user_detail_oapi_success %s",
+            _presence_summary(result, "userid", "name", "email", "org_email", "mobile"),
+        )
+        return result
 
 
 def _enrich_with_oapi(result: Dict[str, Any], union_id: str, app: DingTalkApp) -> Dict[str, Any]:
@@ -288,6 +322,7 @@ def _enrich_with_oapi(result: Dict[str, Any], union_id: str, app: DingTalkApp) -
     失败时静默返回原始 result，不影响主流程。
     """
     try:
+        logger.debug("dingtalk_oapi_enrich_start has_unionid=%s", bool(union_id))
         app_access_token = _fetch_app_access_token_sync(app)
         user_id = _get_userid_by_unionid_sync(app_access_token, union_id)
         if user_id:
@@ -300,10 +335,22 @@ def _enrich_with_oapi(result: Dict[str, Any], union_id: str, app: DingTalkApp) -
                 result["userid"] = user_id
             if not result.get("unionid"):
                 result["unionid"] = union_id
+            logger.debug(
+                "dingtalk_oapi_enrich_success %s",
+                _presence_summary(result, "userid", "unionid", "name", "email", "org_email", "mobile"),
+            )
+        else:
+            logger.debug("dingtalk_oapi_enrich_skipped reason=missing_userid")
     except Exception as e:
         logger.warning(
             "dingtalk_oapi_enrich_failed",
             extra={"event": "dingtalk_oapi_enrich_failed", "error_type": type(e).__name__},
+        )
+        logger.debug(
+            "dingtalk_oapi_enrich_failed error_type=%s error=%r",
+            type(e).__name__,
+            e,
+            exc_info=True,
         )
     return result
 
@@ -327,14 +374,22 @@ def _get_user_info_sync(code: str, app: DingTalkApp) -> Dict[str, Any]:
 
     # Step 2: 优先尝试 SDK 获取详细信息
     if app.fetch_user_details:
+        logger.debug("dingtalk_user_detail_sdk_start")
         sdk_result = _fetch_user_detail_via_sdk(user_access_token, app)
         if sdk_result:
             result = sdk_result
             open_id = sdk_result.get("openId")
             union_id = sdk_result.get("unionid")
+    else:
+        logger.debug("dingtalk_user_detail_sdk_skipped reason=fetch_user_details_disabled")
 
     # Step 3: 若尚未获得 openId/unionId，通过 REST API 获取基础信息
     if not open_id or not union_id:
+        logger.debug(
+            "dingtalk_user_basic_start reason=missing_identity has_openId=%s has_unionid=%s",
+            bool(open_id),
+            bool(union_id),
+        )
         basic = _fetch_user_basic_info_via_rest(user_access_token)
         if basic:
             open_id = open_id or basic.get("openId")
@@ -349,6 +404,7 @@ def _get_user_info_sync(code: str, app: DingTalkApp) -> Dict[str, Any]:
 
     # 如果两步都失败，无法继续
     if not result:
+        logger.debug("dingtalk_user_info_failed reason=empty_result")
         raise DingTalkAPIError("Failed to get any user info from DingTalk")
 
     # 确保关键主键字段填充
@@ -360,6 +416,13 @@ def _get_user_info_sync(code: str, app: DingTalkApp) -> Dict[str, Any]:
     # Step 4: 通过 OAPI 补充企业详情（部门等），失败不影响主流程
     if union_id:
         result = _enrich_with_oapi(result, union_id, app)
+    else:
+        logger.debug("dingtalk_oapi_enrich_skipped reason=missing_unionid")
+
+    logger.debug(
+        "dingtalk_user_info_success %s",
+        _presence_summary(result, "userid", "openId", "unionid", "name", "email", "org_email", "mobile"),
+    )
 
     return result
 

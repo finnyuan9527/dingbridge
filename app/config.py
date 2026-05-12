@@ -45,6 +45,10 @@ class DatabaseSettings(BaseSettings):
     url: str = "sqlite:///./dingbridge.sqlite3"
 
 
+class LoggingSettings(BaseSettings):
+    level: str = "INFO"
+
+
 class SecuritySettings(BaseSettings):
     # 注意：
     # - 默认不内置任何真实密钥，便于本机运行时使用进程内临时密钥对
@@ -76,6 +80,7 @@ class Settings(BaseSettings):
     oidc: OIDCSettings = OIDCSettings()
     redis: RedisSettings = RedisSettings()
     database: DatabaseSettings = DatabaseSettings()
+    logging: LoggingSettings = LoggingSettings()
     security: SecuritySettings = SecuritySettings()
 
 
