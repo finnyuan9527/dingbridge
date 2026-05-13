@@ -123,7 +123,7 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     # 否则默认只请求基础身份信息
     scope = "openid corpid"
     if app.fetch_user_details:
-        scope = "openid corpid Contact.User.Read"
+        scope = "openid corpid"
 
     logger.debug(
         "dingtalk_oauth_login_url_build app=%r scope=%s callback_url_configured=%s",
