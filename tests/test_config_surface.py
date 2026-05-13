@@ -5,6 +5,7 @@ import io
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 
 os.environ.setdefault("SECURITY__ALLOW_EPHEMERAL_KEYS", "true")
@@ -152,6 +153,24 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     assert dump["deptNames"] == "***REDACTED***"
     assert dump["phoneNumber"] == "***REDACTED***"
     assert dump["nested"][0]["name"] == "***REDACTED***"
+
+
+def test_dingtalk_oauth_scope_includes_contact_read_for_basic_identity_lookup():
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    app = SimpleNamespace(
+        id=1,
+        name="Default DingTalk App",
+        enabled=True,
+        is_default=True,
+        app_key="ding-app-key",
+        callback_url="https://sso.example.com/dingtalk/callback",
+        fetch_user_details=False,
+    )
+
+    url = dingtalk_adapter.build_oauth_login_url(state="state-1", app=app)
+    query = parse_qs(urlparse(url).query)
+
+    assert query["scope"] == ["openid corpid Contact.User.Read"]
 
 
 def test_dingtalk_user_info_still_enriches_when_detail_fetch_disabled(monkeypatch):
