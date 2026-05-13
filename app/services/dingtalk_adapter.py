@@ -32,6 +32,88 @@ def _presence_summary(data: Dict[str, Any], *fields: str) -> str:
     return " ".join(f"has_{field}={bool(data.get(field))}" for field in fields)
 
 
+def _request_id_from_headers(resp: httpx.Response) -> str | None:
+    return resp.headers.get("x-acs-request-id") or resp.headers.get("x-acs-trace-id")
+
+
+def _app_debug_summary(app: DingTalkApp) -> dict:
+    return {
+        "id": app.id,
+        "name": app.name,
+        "enabled": app.enabled,
+        "is_default": app.is_default,
+        "app_key": app.app_key,
+        "callback_url": str(app.callback_url),
+        "fetch_user_details": app.fetch_user_details,
+    }
+
+
+def _debug_dump_value(value: Any) -> Any:
+    secret_keys = {
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "appsecret",
+        "app_secret",
+        "client_secret",
+        "secret",
+        "token",
+        "x-acs-dingtalk-access-token",
+        "x_acs_dingtalk_access_token",
+    }
+    profile_keys = {
+        "address",
+        "avatar",
+        "avatar_url",
+        "avatarurl",
+        "dept_name_list",
+        "dept_names",
+        "deptnamelist",
+        "deptnames",
+        "email",
+        "extension",
+        "job_number",
+        "jobnumber",
+        "manager_userid",
+        "manageruserid",
+        "mobile",
+        "name",
+        "nick",
+        "nickname",
+        "org_email",
+        "orgemail",
+        "phone",
+        "phone_number",
+        "phonenumber",
+        "remark",
+        "state_code",
+        "statecode",
+        "telephone",
+        "title",
+        "work_place",
+        "workplace",
+    }
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            normalized = key_text.lower().replace("-", "_")
+            if normalized in secret_keys or normalized in profile_keys:
+                out[key_text] = "***REDACTED***"
+            else:
+                out[key_text] = _debug_dump_value(item)
+        return out
+    if isinstance(value, list):
+        return [_debug_dump_value(item) for item in value]
+    if hasattr(value, "to_map"):
+        try:
+            return _debug_dump_value(value.to_map())
+        except Exception:
+            return repr(value)
+    return value
+
+
 def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     """
     构造钉钉 OAuth 登录 URL。
@@ -42,6 +124,13 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     scope = "openid corpid"
     if app.fetch_user_details:
         scope = "openid corpid Contact.User.Read"
+
+    logger.debug(
+        "dingtalk_oauth_login_url_build app=%r scope=%s callback_url_configured=%s",
+        _app_debug_summary(app),
+        scope,
+        bool(app.callback_url),
+    )
 
     query = urlencode(
         {
@@ -65,9 +154,11 @@ async def fetch_access_token(app: DingTalkApp) -> str:
 
     token = await redis.get(cache_key)
     if token:
+        logger.debug("dingtalk_app_token_cache_hit app=%r", _app_debug_summary(app))
         return token
 
     async with httpx.AsyncClient() as client:
+        logger.debug("dingtalk_app_token_request_start app=%r", _app_debug_summary(app))
         resp = await client.get(
             str(settings.dingtalk.token_base_url),
             params={
@@ -76,9 +167,21 @@ async def fetch_access_token(app: DingTalkApp) -> str:
             },
             timeout=5.0,
         )
+        logger.debug(
+            "dingtalk_app_token_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("dingtalk_app_token_raw body=%r", _debug_dump_value(data))
         if data.get("errcode") != 0:
+            logger.debug(
+                "dingtalk_app_token_result ok=false errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+            )
             logger.warning(
                 "dingtalk_app_token_failed errcode=%s errmsg=%s request_id=%s",
                 data.get("errcode"),
@@ -96,6 +199,12 @@ async def fetch_access_token(app: DingTalkApp) -> str:
         ttl = max(expires_in - 200, 60)
 
         await redis.set(cache_key, token, ex=ttl)
+        logger.debug(
+            "dingtalk_app_token_result ok=true has_access_token=%s expires_in=%s cache_ttl=%s",
+            bool(token),
+            expires_in,
+            ttl,
+        )
         return token
 
 
@@ -107,6 +216,7 @@ async def fetch_access_token(app: DingTalkApp) -> str:
 def _fetch_app_access_token_sync(app: DingTalkApp) -> str:
     """获取钉钉企业应用 AccessToken（同步）。"""
     with httpx.Client() as client:
+        logger.debug("dingtalk_app_token_request_start app=%r", _app_debug_summary(app))
         resp = client.get(
             str(settings.dingtalk.token_base_url),
             params={
@@ -115,9 +225,21 @@ def _fetch_app_access_token_sync(app: DingTalkApp) -> str:
             },
             timeout=5.0,
         )
+        logger.debug(
+            "dingtalk_app_token_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("dingtalk_app_token_raw body=%r", _debug_dump_value(data))
         if data.get("errcode") != 0:
+            logger.debug(
+                "dingtalk_app_token_result ok=false errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+            )
             logger.warning(
                 "dingtalk_app_token_failed errcode=%s errmsg=%s request_id=%s",
                 data.get("errcode"),
@@ -128,7 +250,13 @@ def _fetch_app_access_token_sync(app: DingTalkApp) -> str:
             raise DingTalkAPIError(
                 f"Failed to get dingtalk token: errcode={data.get('errcode')} errmsg={data.get('errmsg')} request_id={data.get('request_id')}"
             )
-        return data["access_token"]
+        token = data["access_token"]
+        logger.debug(
+            "dingtalk_app_token_result ok=true has_access_token=%s expires_in=%s",
+            bool(token),
+            data.get("expires_in"),
+        )
+        return token
 
 
 def _exchange_user_access_token(code: str, app: DingTalkApp) -> str:
@@ -145,9 +273,16 @@ def _exchange_user_access_token(code: str, app: DingTalkApp) -> str:
         grant_type="authorization_code",
     )
     try:
+        logger.debug(
+            "dingtalk_user_token_request_start app=%r client_id=%s grant_type=authorization_code",
+            _app_debug_summary(app),
+            app.app_key,
+        )
         token_response = oauth_client.get_user_token(token_request)
-        logger.debug("dingtalk_user_token_success")
-        return token_response.body.access_token
+        logger.debug("dingtalk_user_token_raw body=%r", _debug_dump_value(token_response.body))
+        token = token_response.body.access_token
+        logger.debug("dingtalk_user_token_result ok=true has_access_token=%s", bool(token))
+        return token
     except Exception as e:
         logger.warning(
             "dingtalk_user_token_failed",
@@ -171,6 +306,7 @@ def _fetch_user_detail_via_sdk(user_access_token: str, app: DingTalkApp) -> Opti
     contact_client = ContactClient(config)
     headers = contact_models.GetUserHeaders(x_acs_dingtalk_access_token=user_access_token)
     try:
+        logger.debug("dingtalk_user_detail_sdk_request_start target=me")
         user_response = contact_client.get_user_with_options("me", headers, util_models.RuntimeOptions())
         body = user_response.body
         result = {
@@ -184,9 +320,10 @@ def _fetch_user_detail_via_sdk(user_access_token: str, app: DingTalkApp) -> Opti
             "state_code": body.state_code,
         }
         logger.debug(
-            "dingtalk_user_detail_sdk_success %s",
+            "dingtalk_user_detail_sdk_result ok=true %s",
             _presence_summary(result, "openId", "unionid", "name", "email", "mobile"),
         )
+        logger.debug("dingtalk_user_detail_sdk_raw body=%r", _debug_dump_value(result))
         return result
     except Exception as e:
         logger.warning(
@@ -212,10 +349,16 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
     返回原始字段字典；失败时返回 None。
     """
     try:
+        logger.debug("dingtalk_user_basic_request_start endpoint=/v1.0/contact/users/me")
         resp = httpx.get(
             "https://api.dingtalk.com/v1.0/contact/users/me",
             headers={"x-acs-dingtalk-access-token": user_access_token},
             timeout=5.0,
+        )
+        logger.debug(
+            "dingtalk_user_basic_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
         )
         if resp.status_code >= 400:
             try:
@@ -231,11 +374,12 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
                 extra={"event": "dingtalk_user_basic_failed"},
             )
             logger.debug(
-                "dingtalk_user_basic_failed body=%r",
-                err,
+                "dingtalk_user_basic_result ok=false body=%r",
+                _debug_dump_value(err),
             )
             resp.raise_for_status()
         data = resp.json()
+        logger.debug("dingtalk_user_basic_raw body=%r", _debug_dump_value(data))
         result = {
             "userid": data.get("openId"),
             "openId": data.get("openId"),
@@ -244,7 +388,7 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
             "avatar": data.get("avatarUrl"),
         }
         logger.debug(
-            "dingtalk_user_basic_success %s",
+            "dingtalk_user_basic_result ok=true %s",
             _presence_summary(result, "openId", "unionid", "name"),
         )
         return result
@@ -265,15 +409,28 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
 def _get_userid_by_unionid_sync(app_access_token: str, union_id: str) -> Optional[str]:
     """通过 unionId 查询企业内 userId（同步）。"""
     with httpx.Client() as client:
+        logger.debug("dingtalk_get_userid_request_start endpoint=/topapi/user/getbyunionid")
         resp = client.post(
             "https://oapi.dingtalk.com/topapi/user/getbyunionid",
             params={"access_token": app_access_token},
             json={"unionid": union_id},
             timeout=5.0,
         )
+        logger.debug(
+            "dingtalk_get_userid_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("dingtalk_get_userid_raw body=%r", _debug_dump_value(data))
         if data.get("errcode") != 0:
+            logger.debug(
+                "dingtalk_get_userid_result ok=false errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+            )
             logger.warning(
                 "dingtalk_get_userid_failed errcode=%s errmsg=%s request_id=%s",
                 data.get("errcode"),
@@ -284,22 +441,35 @@ def _get_userid_by_unionid_sync(app_access_token: str, union_id: str) -> Optiona
             return None
         result = data.get("result") or {}
         user_id = result.get("userid")
-        logger.debug("dingtalk_get_userid_success has_userid=%s", bool(user_id))
+        logger.debug("dingtalk_get_userid_result ok=true has_userid=%s", bool(user_id))
         return user_id
 
 
 def _get_user_detail_by_userid_sync(app_access_token: str, user_id: str) -> Dict[str, Any]:
     """通过企业内 userId 查询用户详情（部门、手机号、邮箱等）（同步）。"""
     with httpx.Client() as client:
+        logger.debug("dingtalk_user_detail_oapi_request_start endpoint=/topapi/v2/user/get")
         resp = client.post(
             "https://oapi.dingtalk.com/topapi/v2/user/get",
             params={"access_token": app_access_token},
             json={"userid": user_id},
             timeout=5.0,
         )
+        logger.debug(
+            "dingtalk_user_detail_oapi_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("dingtalk_user_detail_oapi_raw body=%r", _debug_dump_value(data))
         if data.get("errcode") != 0:
+            logger.debug(
+                "dingtalk_user_detail_oapi_result ok=false errcode=%s errmsg=%s request_id=%s",
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("request_id"),
+            )
             logger.warning(
                 "dingtalk_user_detail_oapi_failed errcode=%s errmsg=%s request_id=%s",
                 data.get("errcode"),
@@ -310,7 +480,7 @@ def _get_user_detail_by_userid_sync(app_access_token: str, user_id: str) -> Dict
             return {}
         result = data.get("result") or {}
         logger.debug(
-            "dingtalk_user_detail_oapi_success %s",
+            "dingtalk_user_detail_oapi_result ok=true %s",
             _presence_summary(result, "userid", "name", "email", "org_email", "mobile"),
         )
         return result
@@ -339,6 +509,7 @@ def _enrich_with_oapi(result: Dict[str, Any], union_id: str, app: DingTalkApp) -
                 "dingtalk_oapi_enrich_success %s",
                 _presence_summary(result, "userid", "unionid", "name", "email", "org_email", "mobile"),
             )
+            logger.debug("dingtalk_oapi_enrich_raw result=%r", _debug_dump_value(result))
         else:
             logger.debug("dingtalk_oapi_enrich_skipped reason=missing_userid")
     except Exception as e:
@@ -423,6 +594,7 @@ def _get_user_info_sync(code: str, app: DingTalkApp) -> Dict[str, Any]:
         "dingtalk_user_info_success %s",
         _presence_summary(result, "userid", "openId", "unionid", "name", "email", "org_email", "mobile"),
     )
+    logger.debug("dingtalk_user_info_raw result=%r", _debug_dump_value(result))
 
     return result
 
@@ -472,6 +644,7 @@ def _normalize_dingtalk_user(raw: Dict[str, Any]) -> Dict[str, Any]:
     if union_id is not None:
         normalized["unionid"] = union_id
 
+    logger.debug("dingtalk_user_normalized_raw body=%r", _debug_dump_value(normalized))
     return normalized
 
 

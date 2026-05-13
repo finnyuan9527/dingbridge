@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from typing import Dict, Optional
@@ -7,6 +8,10 @@ from pydantic import AnyHttpUrl, BaseModel
 from app.config import settings
 from app.db.migrations import ensure_schema_current
 from app.services import config_store
+
+
+logger = logging.getLogger("dingbridge.dingtalk")
+
 
 class OIDCClient(BaseModel):
     client_id: str
@@ -33,6 +38,29 @@ class DingTalkApp(BaseModel):
     app_secret: str
     callback_url: AnyHttpUrl
     fetch_user_details: bool = True
+
+
+def _dingtalk_app_debug(app: DingTalkApp) -> dict:
+    return {
+        "id": app.id,
+        "name": app.name,
+        "enabled": app.enabled,
+        "is_default": app.is_default,
+        "app_key": app.app_key,
+        "callback_url": str(app.callback_url),
+        "fetch_user_details": app.fetch_user_details,
+    }
+
+
+def _oidc_client_debug(client: OIDCClient) -> dict:
+    return {
+        "client_id": client.client_id,
+        "enabled": client.enabled,
+        "require_pkce": client.require_pkce,
+        "dingtalk_app_id": client.dingtalk_app_id,
+        "redirect_uri_count": len(client.redirect_uris),
+    }
+
 
 class ClientRegistry:
     _oidc_clients: Dict[str, OIDCClient] = {}
@@ -85,6 +113,12 @@ class ClientRegistry:
         cls._dingtalk_apps = dingtalk_apps
         cls._default_dingtalk_app_id = default_dingtalk_app_id
         cls._loaded_at = time.time()
+        logger.debug(
+            "client_registry_loaded source=settings apps=%r default_dingtalk_app_id=%s oidc_clients=%r",
+            [_dingtalk_app_debug(app) for app in dingtalk_apps.values()],
+            default_dingtalk_app_id,
+            [_oidc_client_debug(client) for client in oidc_clients.values()],
+        )
 
     @classmethod
     def _load_from_db(cls):
@@ -112,6 +146,12 @@ class ClientRegistry:
         cls._dingtalk_apps = dingtalk_apps
         cls._default_dingtalk_app_id = default_dingtalk_app_id
         cls._loaded_at = time.time()
+        logger.debug(
+            "client_registry_loaded source=db apps=%r default_dingtalk_app_id=%s oidc_clients=%r",
+            [_dingtalk_app_debug(app) for app in dingtalk_apps.values()],
+            default_dingtalk_app_id,
+            [_oidc_client_debug(client) for client in oidc_clients.values()],
+        )
 
     @classmethod
     def _ensure_loaded(cls, *, force: bool = False):
@@ -126,7 +166,13 @@ class ClientRegistry:
                 cls._load_from_db()
             except RuntimeError:
                 raise
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    "client_registry_db_load_failed_fallback_to_settings error_type=%s error=%r",
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
                 cls._load_from_settings()
 
     @classmethod
@@ -157,24 +203,54 @@ class ClientRegistry:
         cls._ensure_loaded()
         app = cls._dingtalk_apps.get(app_id)
         if app and app.enabled:
+            logger.debug("dingtalk_app_lookup app_id=%s result=enabled app=%r", app_id, _dingtalk_app_debug(app))
             return app
+        logger.debug(
+            "dingtalk_app_lookup app_id=%s result=%s",
+            app_id,
+            "disabled" if app else "missing",
+        )
         return None
 
     @classmethod
     def get_dingtalk_app_for_oidc_client(cls, client_id: Optional[str]) -> Optional[DingTalkApp]:
         cls._ensure_loaded()
+        logger.debug("dingtalk_app_select_start client_id=%s", client_id)
         if client_id:
             c = cls._oidc_clients.get(client_id)
+            if not c:
+                logger.debug("dingtalk_app_select client_id=%s result=missing_oidc_client", client_id)
+            elif not c.enabled:
+                logger.debug("dingtalk_app_select client_id=%s result=disabled_oidc_client", client_id)
             if c and c.enabled and c.dingtalk_app_id is not None:
                 app = cls.get_dingtalk_app(c.dingtalk_app_id)
                 if app:
+                    logger.debug(
+                        "dingtalk_app_select client_id=%s source=oidc_client_binding dingtalk_app_id=%s app=%r",
+                        client_id,
+                        c.dingtalk_app_id,
+                        _dingtalk_app_debug(app),
+                    )
                     return app
+                logger.debug(
+                    "dingtalk_app_select client_id=%s source=oidc_client_binding dingtalk_app_id=%s result=missing_or_disabled_app",
+                    client_id,
+                    c.dingtalk_app_id,
+                )
+            elif c and c.enabled:
+                logger.debug("dingtalk_app_select client_id=%s source=oidc_client_binding result=no_bound_app", client_id)
         if cls._default_dingtalk_app_id is not None:
             app = cls.get_dingtalk_app(cls._default_dingtalk_app_id)
             if app:
+                logger.debug(
+                    "dingtalk_app_select client_id=%s source=default_app dingtalk_app_id=%s app=%r",
+                    client_id,
+                    cls._default_dingtalk_app_id,
+                    _dingtalk_app_debug(app),
+                )
                 return app
         if settings.dingtalk.app_key and settings.dingtalk.app_secret:
-            return DingTalkApp(
+            app = DingTalkApp(
                 id=0,
                 name="Default DingTalk App",
                 enabled=True,
@@ -184,6 +260,9 @@ class ClientRegistry:
                 callback_url=settings.dingtalk.callback_url,
                 fetch_user_details=settings.dingtalk.fetch_user_details,
             )
+            logger.debug("dingtalk_app_select client_id=%s source=settings_fallback app=%r", client_id, _dingtalk_app_debug(app))
+            return app
+        logger.debug("dingtalk_app_select client_id=%s result=missing_config", client_id)
         return None
 
     @classmethod

@@ -34,6 +34,12 @@ def _is_safe_redirect_target(redirect: str, issuer: str) -> bool:
     return redirect.startswith("/")
 
 
+def _state_debug(state: str) -> str:
+    if len(state) <= 12:
+        return state
+    return f"{state[:6]}...{state[-6:]}"
+
+
 @router.get("/login")
 async def dingtalk_login(
     redirect: str, client_id: str | None = None, dingtalk_app_id: int | None = None
@@ -44,7 +50,21 @@ async def dingtalk_login(
     """
     # 基础防护：仅允许回跳到与 issuer 相同的站点或相对路径，避免开放重定向。
     issuer = str(client_registry.ClientRegistry.get_idp_settings().oidc_issuer)
+    logger.debug(
+        "dingtalk_login_start client_id=%s dingtalk_app_id=%s redirect=%s issuer=%s",
+        client_id,
+        dingtalk_app_id,
+        redirect,
+        issuer,
+    )
     if not _is_safe_redirect_target(redirect, issuer):
+        logger.debug(
+            "dingtalk_login_invalid_redirect client_id=%s dingtalk_app_id=%s redirect=%s issuer=%s",
+            client_id,
+            dingtalk_app_id,
+            redirect,
+            issuer,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_redirect_target")
 
     state = secrets.token_urlsafe(32)
@@ -54,6 +74,13 @@ async def dingtalk_login(
         json.dumps({"redirect": redirect, "client_id": client_id, "dingtalk_app_id": dingtalk_app_id}),
         ex=timedelta(minutes=10),
     )
+    logger.debug(
+        "dingtalk_login_state_saved state=%s client_id=%s dingtalk_app_id=%s ttl_seconds=%s",
+        _state_debug(state),
+        client_id,
+        dingtalk_app_id,
+        600,
+    )
 
     app = None
     if dingtalk_app_id is not None:
@@ -61,8 +88,16 @@ async def dingtalk_login(
     if not app:
         app = client_registry.ClientRegistry.get_dingtalk_app_for_oidc_client(client_id)
     if not app:
+        logger.debug("dingtalk_login_missing_app_config client_id=%s dingtalk_app_id=%s", client_id, dingtalk_app_id)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="missing_dingtalk_app_config")
     login_url = dingtalk_adapter.build_oauth_login_url(state=state, app=app)
+    logger.debug(
+        "dingtalk_login_redirect client_id=%s dingtalk_app_id=%s state=%s dingtalk_app_key=%s",
+        client_id,
+        dingtalk_app_id,
+        _state_debug(state),
+        app.app_key,
+    )
     return RedirectResponse(url=login_url, status_code=status.HTTP_302_FOUND)
 
 
@@ -76,23 +111,58 @@ async def dingtalk_callback(request: Request, code: str, state: str):
     """
     redis = get_redis()
     key = f"dingbridge:dingtalk:state:{state}"
+    ip = request.client.host if request.client else None
+    logger.debug(
+        "dingtalk_callback_start state=%s has_code=%s ip=%s",
+        _state_debug(state),
+        bool(code),
+        ip,
+    )
     raw_state = await redis.get(key)
+    logger.debug(
+        "dingtalk_callback_state_lookup state=%s found=%s",
+        _state_debug(state),
+        raw_state is not None,
+    )
     if not raw_state:
+        logger.debug("dingtalk_callback_invalid_state state=%s reason=missing_or_expired", _state_debug(state))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_state")
     await redis.delete(key)
+    logger.debug("dingtalk_callback_state_consumed state=%s", _state_debug(state))
 
     try:
         state_data = json.loads(raw_state)
     except Exception:
+        logger.debug("dingtalk_callback_invalid_state state=%s reason=invalid_json raw_state=%r", _state_debug(state), raw_state)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_state")
 
     redirect_url = str(state_data.get("redirect") or "")
     client_id = state_data.get("client_id")
     dingtalk_app_id = state_data.get("dingtalk_app_id")
+    logger.debug(
+        "dingtalk_callback_state_loaded state=%s client_id=%s dingtalk_app_id=%s redirect=%s",
+        _state_debug(state),
+        client_id,
+        dingtalk_app_id,
+        redirect_url,
+    )
 
     try:
+        logger.debug(
+            "dingtalk_callback_auth_start client_id=%s dingtalk_app_id=%s has_code=%s",
+            client_id,
+            dingtalk_app_id,
+            bool(code),
+        )
         user = await auth_orchestrator.handle_dingtalk_callback(
             code, client_id=client_id, dingtalk_app_id=dingtalk_app_id
+        )
+        logger.debug(
+            "dingtalk_callback_auth_success client_id=%s dingtalk_app_id=%s user_subject=%s has_email=%s",
+            client_id,
+            dingtalk_app_id,
+            user.subject,
+            bool(user.email),
         )
     except Exception as e:
         logger.debug(
@@ -103,7 +173,6 @@ async def dingtalk_callback(request: Request, code: str, state: str):
             e,
             exc_info=True,
         )
-        ip = request.client.host if request.client else None
         await audit.log_login_failure_async(
             reason=type(e).__name__,
             source="dingtalk_callback",
@@ -113,12 +182,36 @@ async def dingtalk_callback(request: Request, code: str, state: str):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dingtalk_login_failed")
 
     session_id = secrets.token_urlsafe(32)
+    logger.debug(
+        "dingtalk_callback_session_create_start client_id=%s user_subject=%s",
+        client_id,
+        user.subject,
+    )
     await session_service.create_session(session_id, user)
+    logger.debug(
+        "dingtalk_callback_session_create_success client_id=%s user_subject=%s",
+        client_id,
+        user.subject,
+    )
     
     issuer = str(client_registry.ClientRegistry.get_idp_settings().oidc_issuer)
     if not _is_safe_redirect_target(redirect_url, issuer):
+        logger.debug(
+            "dingtalk_callback_unsafe_redirect_replaced client_id=%s redirect=%s issuer=%s",
+            client_id,
+            redirect_url,
+            issuer,
+        )
         redirect_url = "/"
 
     resp = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     session_service.set_session_cookie(resp, session_id)
+    logger.debug(
+        "dingtalk_callback_success client_id=%s dingtalk_app_id=%s user_subject=%s has_email=%s redirect=%s",
+        client_id,
+        dingtalk_app_id,
+        user.subject,
+        bool(user.email),
+        redirect_url,
+    )
     return resp

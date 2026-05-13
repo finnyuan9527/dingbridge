@@ -1,6 +1,10 @@
+import logging
 from typing import Any, Dict
 
 from app.models.user import User
+
+
+logger = logging.getLogger("dingbridge.dingtalk")
 
 
 def map_dingtalk_to_user(dingtalk_data: dict) -> User:
@@ -27,7 +31,7 @@ def map_dingtalk_to_user(dingtalk_data: dict) -> User:
     if dingtalk_data.get("isAdmin"):
         groups.append("dingtalk_admin")
 
-    return User(
+    user = User(
         subject=subject,
         name=name,
         email=email,
@@ -35,6 +39,17 @@ def map_dingtalk_to_user(dingtalk_data: dict) -> User:
         groups=groups,
         raw=dingtalk_data,
     )
+    logger.debug(
+        "dingtalk_identity_mapping_result subject=%s has_name=%s has_email=%s has_phone=%s group_count=%s raw_has_userid=%s raw_has_unionid=%s",
+        user.subject,
+        bool(user.name),
+        bool(user.email),
+        bool(user.phone_number),
+        len(user.groups),
+        bool(dingtalk_data.get("userid") or dingtalk_data.get("userId")),
+        bool(dingtalk_data.get("unionid") or dingtalk_data.get("unionId")),
+    )
+    return user
 
 
 def user_to_oidc_claims(user: User) -> Dict[str, Any]:
