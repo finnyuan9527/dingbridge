@@ -76,6 +76,7 @@ def main():
         return
 
     open_id = None
+    union_id = None
     employee_user_id = None
 
     print("\n[Step 2] Fetching login identity via /v1.0/contact/users/me...")
@@ -93,6 +94,7 @@ def main():
             user_data = resp.json()
             print(json.dumps(user_data, indent=2, ensure_ascii=False))
             open_id = user_data.get("openId")
+            union_id = user_data.get("unionId") or user_data.get("unionid")
             employee_user_id = user_data.get("userid") or user_data.get("userId")
         except:
             print(resp.text)
@@ -102,9 +104,7 @@ def main():
         return
 
     print(f"OpenId: {open_id or '(missing)'}")
-    if not employee_user_id:
-        print("No employee userid returned by /v1.0/contact/users/me; skip organization detail lookup.")
-        return
+    print(f"UnionId: {union_id or '(missing)'}")
 
     print("\n[Step 3] Exchanging appKey/appSecret for app accessToken...")
     try:
@@ -129,7 +129,34 @@ def main():
         print(f"Failed to get app token: {e}")
         return
 
-    print("\n[Step 4] Fetching organization user detail via topapi/v2/user/get...")
+    if not employee_user_id:
+        if not union_id:
+            print("No unionId or employee userid returned by /v1.0/contact/users/me; skip organization detail lookup.")
+            return
+        print("\n[Step 4] Resolving employee userid via topapi/user/getbyunionid...")
+        try:
+            resp = requests.post(
+                "https://oapi.dingtalk.com/topapi/user/getbyunionid",
+                params={"access_token": app_access_token},
+                json={"unionid": union_id},
+                timeout=5.0,
+            )
+            print(f"Status Code: {resp.status_code}")
+            print("Response Body:")
+            try:
+                union_data = resp.json()
+                print(json.dumps(union_data, indent=2, ensure_ascii=False))
+                employee_user_id = (union_data.get("result") or {}).get("userid")
+            except:
+                print(resp.text)
+            if not employee_user_id:
+                print("Failed to resolve employee userid from unionId.")
+                return
+        except Exception as e:
+            print(f"Error resolving employee userid: {e}")
+            return
+
+    print("\n[Step 5] Fetching organization user detail via topapi/v2/user/get...")
     try:
         resp = requests.post(
             "https://oapi.dingtalk.com/topapi/v2/user/get",

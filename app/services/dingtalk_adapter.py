@@ -317,6 +317,7 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
         logger.debug("dingtalk_user_basic_raw body=%r", data)
         result = {
             "openId": data.get("openId"),
+            "unionId": data.get("unionId") or data.get("unionid"),
             "employeeUserId": data.get("userid") or data.get("userId"),
             "name": data.get("nick"),
             "email": data.get("email"),
@@ -336,6 +337,80 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
         )
         logger.debug(
             "dingtalk_user_basic_exception error_type=%s error=%r",
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
+        return None
+
+
+def _resolve_userid_by_unionid_via_rest(app_access_token: str, union_id: str) -> Optional[str]:
+    """
+    通过 unionId 解析企业通讯录 userid。
+    这里使用的是应用 accessToken，不是用户 userAccessToken。
+    """
+    try:
+        endpoint = "https://oapi.dingtalk.com/topapi/user/getbyunionid"
+        params = {"access_token": app_access_token}
+        body = {"unionid": union_id}
+        logger.debug(
+            "dingtalk_userid_by_unionid_request endpoint=%s params=%r body=%r",
+            endpoint,
+            params,
+            body,
+        )
+        resp = httpx.post(endpoint, params=params, json=body, timeout=5.0)
+        logger.debug(
+            "dingtalk_userid_by_unionid_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
+        if resp.status_code >= 400:
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"body": (resp.text or "")[:500]}
+            logger.warning(
+                "dingtalk_userid_by_unionid_failed status_code=%s code=%s message=%s requestid=%s",
+                resp.status_code,
+                err.get("errcode") or err.get("code"),
+                err.get("errmsg") or err.get("message"),
+                err.get("requestid") or err.get("request_id"),
+                extra={"event": "dingtalk_userid_by_unionid_failed"},
+            )
+            logger.debug("dingtalk_userid_by_unionid_result ok=false body=%r", err)
+            resp.raise_for_status()
+
+        data = resp.json()
+        logger.debug("dingtalk_userid_by_unionid_raw body=%r", data)
+        errcode = data.get("errcode")
+        if errcode not in (None, 0, "0"):
+            logger.warning(
+                "dingtalk_userid_by_unionid_failed status_code=%s code=%s message=%s requestid=%s",
+                resp.status_code,
+                data.get("errcode"),
+                data.get("errmsg"),
+                data.get("requestid") or data.get("request_id"),
+                extra={"event": "dingtalk_userid_by_unionid_failed"},
+            )
+            logger.debug("dingtalk_userid_by_unionid_result ok=false body=%r", data)
+            return None
+
+        result = data.get("result") or {}
+        if not isinstance(result, dict):
+            logger.debug("dingtalk_userid_by_unionid_result ok=false reason=invalid_result body=%r", data)
+            return None
+
+        user_id = result.get("userid") or result.get("userId")
+        logger.debug("dingtalk_userid_by_unionid_result ok=true has_userid=%s", bool(user_id))
+        return user_id
+    except Exception as e:
+        logger.warning(
+            "dingtalk_userid_by_unionid_exception",
+            extra={"event": "dingtalk_userid_by_unionid_exception", "error_type": type(e).__name__},
+        )
+        logger.debug(
+            "dingtalk_userid_by_unionid_exception error_type=%s error=%r",
             type(e).__name__,
             e,
             exc_info=True,
@@ -462,14 +537,30 @@ def _get_user_info_sync(code: str, app: DingTalkApp) -> Dict[str, Any]:
                 if not result.get(k):
                     result[k] = v
 
-    user_id_for_detail = result.get("employeeUserId") or open_id
+    app_access_token: Optional[str] = None
+    user_id_for_detail = result.get("employeeUserId")
+    union_id = result.get("unionId") or result.get("unionid")
+    if not user_id_for_detail and union_id:
+        logger.debug(
+            "dingtalk_userid_by_unionid_start has_unionId=%s has_openId=%s",
+            bool(union_id),
+            bool(open_id),
+        )
+        app_access_token = _exchange_app_access_token(app)
+        user_id_for_detail = _resolve_userid_by_unionid_via_rest(app_access_token, union_id)
+        if not user_id_for_detail:
+            logger.debug("dingtalk_userid_by_unionid_failed reason=empty_userid has_unionId=%s", bool(union_id))
+            raise DingTalkAPIError("Failed to resolve DingTalk userid from unionId")
+        result["employeeUserId"] = user_id_for_detail
+
     if user_id_for_detail:
         logger.debug(
             "dingtalk_org_user_detail_start user_id=%s has_basic_email=%s",
             user_id_for_detail,
             bool(result.get("email")),
         )
-        app_access_token = _exchange_app_access_token(app)
+        if app_access_token is None:
+            app_access_token = _exchange_app_access_token(app)
         detail = _fetch_org_user_detail_via_rest(app_access_token, user_id_for_detail)
         if not detail:
             logger.debug("dingtalk_org_user_detail_failed reason=empty_detail user_id=%s", user_id_for_detail)
