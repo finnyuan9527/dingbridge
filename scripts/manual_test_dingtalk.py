@@ -1,6 +1,6 @@
 import sys
 import os
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import json
 import requests
 
@@ -37,7 +37,8 @@ def main():
             "scope": scope,
             "state": "test_state",
             "prompt": "consent"
-        }
+        },
+        quote_via=quote,
     )
     
     auth_url = f"{settings.dingtalk.auth_base_url}?{query}"
@@ -69,12 +70,15 @@ def main():
         if not access_token:
             print("Failed to get token: response missing accessToken")
             return
-        print(f"AccessToken: {access_token[:10]}... (success)")
+        print(f"UserAccessToken: {access_token[:10]}... (success)")
     except Exception as e:
         print(f"Failed to get token: {e}")
         return
 
-    print("\n[Step 2] Fetching User Info via REST API...")
+    open_id = None
+    employee_user_id = None
+
+    print("\n[Step 2] Fetching login identity via /v1.0/contact/users/me...")
     try:
         url = "https://api.dingtalk.com/v1.0/contact/users/me"
         headers = {
@@ -86,12 +90,61 @@ def main():
         print(f"Status Code: {resp.status_code}")
         print("Response Body:")
         try:
-            print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+            user_data = resp.json()
+            print(json.dumps(user_data, indent=2, ensure_ascii=False))
+            open_id = user_data.get("openId")
+            employee_user_id = user_data.get("userid") or user_data.get("userId")
         except:
             print(resp.text)
             
     except Exception as e:
         print(f"Error fetching user info: {e}")
+        return
+
+    print(f"OpenId: {open_id or '(missing)'}")
+    if not employee_user_id:
+        print("No employee userid returned by /v1.0/contact/users/me; skip organization detail lookup.")
+        return
+
+    print("\n[Step 3] Exchanging appKey/appSecret for app accessToken...")
+    try:
+        resp = requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+            json={
+                "appKey": settings.dingtalk.app_key,
+                "appSecret": settings.dingtalk.app_secret,
+            },
+            timeout=5.0,
+        )
+        print(f"Status Code: {resp.status_code}")
+        app_token_data = resp.json()
+        print(json.dumps({k: ("***" if "Token" in k else v) for k, v in app_token_data.items()}, indent=2, ensure_ascii=False))
+        resp.raise_for_status()
+        app_access_token = app_token_data.get("accessToken")
+        if not app_access_token:
+            print("Failed to get app token: response missing accessToken")
+            return
+        print(f"AppAccessToken: {app_access_token[:10]}... (success)")
+    except Exception as e:
+        print(f"Failed to get app token: {e}")
+        return
+
+    print("\n[Step 4] Fetching organization user detail via topapi/v2/user/get...")
+    try:
+        resp = requests.post(
+            "https://oapi.dingtalk.com/topapi/v2/user/get",
+            params={"access_token": app_access_token},
+            json={"userid": employee_user_id, "language": "zh_CN"},
+            timeout=5.0,
+        )
+        print(f"Status Code: {resp.status_code}")
+        print("Response Body:")
+        try:
+            print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
+        except:
+            print(resp.text)
+    except Exception as e:
+        print(f"Error fetching organization user detail: {e}")
 
 if __name__ == "__main__":
     main()

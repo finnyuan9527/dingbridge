@@ -214,6 +214,7 @@ def test_dingtalk_basic_rest_maps_contact_profile_fields(monkeypatch):
 
     assert result == {
         "openId": "open-1",
+        "employeeUserId": None,
         "name": "Alice",
         "email": "alice@example.com",
         "mobile": "+8613000000000",
@@ -263,12 +264,169 @@ def test_dingtalk_basic_rest_logs_debug_payloads(monkeypatch):
     assert "+8613000000000" in logs
 
 
-def test_dingtalk_adapter_no_longer_exposes_oapi_unionid_enrichment():
+def test_dingtalk_app_access_token_uses_rest_api_and_logs_debug_payloads(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    app = SimpleNamespace(
+        id=1,
+        name="Default DingTalk App",
+        enabled=True,
+        is_default=True,
+        app_key="ding-app-key",
+        app_secret="secret-value",
+        callback_url="https://sso.example.com/dingtalk/callback",
+    )
+    captured = {}
+
+    def fake_post(url, *, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["timeout"] = timeout
+        request = dingtalk_adapter.httpx.Request("POST", url)
+        return dingtalk_adapter.httpx.Response(
+            200,
+            json={"accessToken": "app-token", "expireIn": 7200},
+            request=request,
+            headers={"x-acs-request-id": "req-app-token-1"},
+        )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "post", fake_post)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    target_logger = logging.getLogger("dingbridge.dingtalk")
+    previous_level = target_logger.level
+    previous_disabled = target_logger.disabled
+    target_logger.disabled = False
+    target_logger.setLevel(logging.DEBUG)
+    target_logger.addHandler(handler)
+    try:
+        token = dingtalk_adapter._exchange_app_access_token(app)
+    finally:
+        target_logger.removeHandler(handler)
+        target_logger.setLevel(previous_level)
+        target_logger.disabled = previous_disabled
+
+    assert token == "app-token"
+    assert captured == {
+        "url": "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+        "json": {
+            "appKey": "ding-app-key",
+            "appSecret": "secret-value",
+        },
+        "timeout": 5.0,
+    }
+    logs = stream.getvalue()
+    assert "dingtalk_app_token_request endpoint=https://api.dingtalk.com/v1.0/oauth2/accessToken body=" in logs
+    assert "dingtalk_app_token_response status_code=200 request_id=req-app-token-1" in logs
+    assert "secret-value" in logs
+    assert "app-token" in logs
+
+
+def test_dingtalk_org_user_detail_rest_maps_corporate_contact_fields(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    captured = {}
+
+    def fake_post(url, *, params, json, timeout):
+        captured["url"] = url
+        captured["params"] = params
+        captured["json"] = json
+        captured["timeout"] = timeout
+        request = dingtalk_adapter.httpx.Request("POST", url)
+        return dingtalk_adapter.httpx.Response(
+            200,
+            json={
+                "errcode": 0,
+                "errmsg": "ok",
+                "result": {
+                    "userid": "open-1",
+                    "name": "Alice Org",
+                    "email": "alice@corp.example.com",
+                    "mobile": "+8613000000000",
+                    "dept_id_list": [1, 2],
+                    "title": "Engineer",
+                },
+            },
+            request=request,
+            headers={"x-acs-request-id": "req-org-user-1"},
+        )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "post", fake_post)
+
+    result = dingtalk_adapter._fetch_org_user_detail_via_rest("app-token", "open-1")
+
+    assert captured == {
+        "url": "https://oapi.dingtalk.com/topapi/v2/user/get",
+        "params": {"access_token": "app-token"},
+        "json": {"userid": "open-1", "language": "zh_CN"},
+        "timeout": 5.0,
+    }
+    assert result["employeeUserId"] == "open-1"
+    assert "userId" not in result
+    assert result["name"] == "Alice Org"
+    assert result["email"] == "alice@corp.example.com"
+    assert result["mobile"] == "+8613000000000"
+    assert result["dept_id_list"] == [1, 2]
+
+
+def test_dingtalk_org_user_detail_rest_accepts_string_zero_errcode(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+
+    def fake_post(url, *, params, json, timeout):
+        request = dingtalk_adapter.httpx.Request("POST", url)
+        return dingtalk_adapter.httpx.Response(
+            200,
+            json={
+                "errcode": "0",
+                "errmsg": "ok",
+                "result": {"userid": "open-1", "email": "alice@corp.example.com"},
+            },
+            request=request,
+        )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "post", fake_post)
+
+    result = dingtalk_adapter._fetch_org_user_detail_via_rest("app-token", "open-1")
+
+    assert result["email"] == "alice@corp.example.com"
+
+
+def test_dingtalk_user_info_uses_openid_for_org_detail_lookup(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    app = SimpleNamespace(app_key="ding-app-key", app_secret="secret-value")
+    calls = []
+
+    monkeypatch.setattr(dingtalk_adapter, "_exchange_user_access_token", lambda code, app: "user-token")
+    monkeypatch.setattr(
+        dingtalk_adapter,
+        "_fetch_user_basic_info_via_rest",
+        lambda token: {"openId": "open-1", "name": "Alice", "email": "alice.personal@example.com"},
+    )
+    monkeypatch.setattr(dingtalk_adapter, "_exchange_app_access_token", lambda app: "app-token")
+
+    def fetch_org_user_detail(app_token, user_id):
+        calls.append((app_token, user_id))
+        return {
+            "employeeUserId": user_id,
+            "name": "Alice Org",
+            "email": "alice@corp.example.com",
+        }
+
+    monkeypatch.setattr(dingtalk_adapter, "_fetch_org_user_detail_via_rest", fetch_org_user_detail)
+
+    result = dingtalk_adapter._get_user_info_sync("auth-code", app)
+
+    assert calls == [("app-token", "open-1")]
+    assert result["openId"] == "open-1"
+    assert result["employeeUserId"] == "open-1"
+    assert "userId" not in result
+    assert result["email"] == "alice@corp.example.com"
+
+
+def test_dingtalk_adapter_no_longer_exposes_unionid_enrichment():
     dingtalk_adapter = _load_real_dingtalk_adapter()
 
     assert not hasattr(dingtalk_adapter, "_enrich_with_oapi")
     assert not hasattr(dingtalk_adapter, "_get_userid_by_unionid_sync")
-    assert not hasattr(dingtalk_adapter, "_get_user_detail_by_userid_sync")
 
 
 def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
@@ -327,24 +485,59 @@ def test_dingtalk_oauth_scope_uses_login_identity_scopes_only():
     assert "scope=openid%2520corpid" not in url
 
 
-def test_dingtalk_user_info_uses_contact_profile_without_oapi_enrichment(monkeypatch):
+def test_dingtalk_user_info_uses_org_contact_detail_after_basic_profile(monkeypatch):
     dingtalk_adapter = _load_real_dingtalk_adapter()
-    app = SimpleNamespace()
+    app = SimpleNamespace(app_key="ding-app-key", app_secret="secret-value")
+    calls = []
 
     monkeypatch.setattr(dingtalk_adapter, "_exchange_user_access_token", lambda code, app: "user-token")
+    monkeypatch.setattr(dingtalk_adapter, "_exchange_app_access_token", lambda app: "app-token")
     monkeypatch.setattr(
         dingtalk_adapter,
         "_fetch_user_basic_info_via_rest",
-        lambda token: {"openId": "open-1", "name": "Alice", "email": "alice@example.com"},
+        lambda token: {
+            "openId": "open-1",
+            "employeeUserId": "employee-1",
+            "name": "Alice",
+            "email": "alice.personal@example.com",
+        },
     )
+    def fetch_org_user_detail(app_token, user_id):
+        calls.append((app_token, user_id))
+        return {
+            "employeeUserId": "employee-1",
+            "name": "Alice Org",
+            "email": "alice@corp.example.com",
+        }
+
+    monkeypatch.setattr(dingtalk_adapter, "_fetch_org_user_detail_via_rest", fetch_org_user_detail)
 
     result = dingtalk_adapter._get_user_info_sync("auth-code", app)
 
+    assert calls == [("app-token", "employee-1")]
     assert result["openId"] == "open-1"
-    assert result["email"] == "alice@example.com"
+    assert result["employeeUserId"] == "employee-1"
+    assert "userId" not in result
+    assert result["name"] == "Alice Org"
+    assert result["email"] == "alice@corp.example.com"
     assert "userid" not in result
-    assert "org_email" not in result
     assert "unionid" not in result
+
+
+def test_dingtalk_normalized_user_preserves_openid_subject_with_employee_userid():
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+
+    result = dingtalk_adapter._normalize_dingtalk_user(
+        {
+            "openId": "open-1",
+            "employeeUserId": "employee-1",
+            "name": "Alice",
+            "email": "alice@corp.example.com",
+        }
+    )
+
+    assert result["userId"] == "open-1"
+    assert result["employeeUserId"] == "employee-1"
 
 
 def test_dingtalk_normalized_user_does_not_alias_openid_as_userid():
