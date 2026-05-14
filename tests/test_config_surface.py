@@ -323,6 +323,7 @@ def test_dingtalk_oauth_scope_uses_login_identity_scopes_only():
     query = parse_qs(urlparse(url).query)
 
     assert query["scope"] == ["openid corpid"]
+    assert "scope=openid%20corpid" in url
 
 
 def test_dingtalk_user_info_uses_contact_profile_without_oapi_enrichment(monkeypatch):

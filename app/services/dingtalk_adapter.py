@@ -122,14 +122,13 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     构造钉钉 OAuth 登录 URL。
     """
     # 登录授权阶段只申请钉钉身份凭证所需范围；通讯录读取权限由应用后台权限控制。
-    scope = "openid corpid"
+    scope = "openid%20corpid"
 
     endpoint = str(settings.dingtalk.auth_base_url).rstrip("/")
     params = {
         "client_id": app.app_key,
         "redirect_uri": str(app.callback_url),
         "response_type": "code",
-        "scope": scope,
         "state": state,
     }
     logger.debug(
@@ -139,7 +138,7 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
         params,
     )
 
-    login_url = f"{endpoint}?{urlencode(params)}"
+    login_url = f"{endpoint}?{urlencode(params)}&scope={scope}"
     logger.debug("dingtalk_oauth_login_url_result endpoint=%s has_login_url=%s", endpoint, bool(login_url))
     return login_url
 
