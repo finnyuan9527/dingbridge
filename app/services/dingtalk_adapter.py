@@ -118,9 +118,8 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     """
     构造钉钉 OAuth 登录 URL。
     """
-    # 当前主链路无论 fetch_user_details 是否开启，都会通过 /v1.0/contact/users/me
-    # 获取基础身份字段，因此授权阶段必须包含 Contact.User.Read。
-    scope = "openid corpid Contact.User.Read"
+    # 登录授权阶段只申请钉钉身份凭证所需范围；通讯录读取权限由应用后台权限控制。
+    scope = "openid corpid"
 
     logger.debug(
         "dingtalk_oauth_login_url_build app=%r scope=%s callback_url_configured=%s",

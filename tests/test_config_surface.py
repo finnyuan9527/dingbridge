@@ -155,7 +155,7 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     assert dump["nested"][0]["name"] == "***REDACTED***"
 
 
-def test_dingtalk_oauth_scope_includes_contact_read_for_basic_identity_lookup():
+def test_dingtalk_oauth_scope_uses_login_identity_scopes_only():
     dingtalk_adapter = _load_real_dingtalk_adapter()
     app = SimpleNamespace(
         id=1,
@@ -170,7 +170,7 @@ def test_dingtalk_oauth_scope_includes_contact_read_for_basic_identity_lookup():
     url = dingtalk_adapter.build_oauth_login_url(state="state-1", app=app)
     query = parse_qs(urlparse(url).query)
 
-    assert query["scope"] == ["openid corpid Contact.User.Read"]
+    assert query["scope"] == ["openid corpid"]
 
 
 def test_dingtalk_user_info_still_enriches_when_detail_fetch_disabled(monkeypatch):
