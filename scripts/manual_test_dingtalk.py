@@ -13,9 +13,6 @@ load_dotenv()
 
 try:
     from app.config import settings
-    from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuth2Client
-    from alibabacloud_dingtalk.oauth2_1_0 import models as oauth2_models
-    from alibabacloud_tea_openapi import models as open_api_models
 except ImportError as e:
     print(f"Error importing modules: {e}")
     sys.exit(1)
@@ -52,24 +49,32 @@ def main():
     if not code:
         return
 
-    print("\n[Step 1] Exchanging Code for UserAccessToken via SDK...")
+    print("\n[Step 1] Exchanging Code for UserAccessToken via REST API...")
     try:
-        config = open_api_models.Config(protocol='https', region_id='central')
-        oauth_client = OAuth2Client(config)
-        token_request = oauth2_models.GetUserTokenRequest(
-            client_id=settings.dingtalk.app_key,
-            client_secret=settings.dingtalk.app_secret,
-            code=code,
-            grant_type='authorization_code'
+        resp = requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
+            json={
+                "clientId": settings.dingtalk.app_key,
+                "clientSecret": settings.dingtalk.app_secret,
+                "code": code,
+                "grantType": "authorization_code",
+            },
+            timeout=5.0,
         )
-        token_response = oauth_client.get_user_token(token_request)
-        access_token = token_response.body.access_token
+        print(f"Status Code: {resp.status_code}")
+        token_data = resp.json()
+        print(json.dumps({k: ("***" if "Token" in k else v) for k, v in token_data.items()}, indent=2, ensure_ascii=False))
+        resp.raise_for_status()
+        access_token = token_data.get("accessToken")
+        if not access_token:
+            print("Failed to get token: response missing accessToken")
+            return
         print(f"AccessToken: {access_token[:10]}... (success)")
     except Exception as e:
         print(f"Failed to get token: {e}")
         return
 
-    print("\n[Step 2] Fetching User Info via HTTP API (Bypassing SDK Models)...")
+    print("\n[Step 2] Fetching User Info via REST API...")
     try:
         url = "https://api.dingtalk.com/v1.0/contact/users/me"
         headers = {

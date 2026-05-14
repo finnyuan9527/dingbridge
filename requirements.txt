@@ -5,8 +5,6 @@ httpx==0.27.0
 pydantic-settings==2.4.0
 python-multipart==0.0.22
 python-dotenv==1.0.1
-alibabacloud_dingtalk==2.0.75
-alibabacloud_tea_openapi==0.3.8
 redis==5.0.4
 SQLAlchemy==2.0.30
 requests==2.32.3

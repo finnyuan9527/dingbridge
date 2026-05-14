@@ -6,10 +6,6 @@ import logging
 
 from starlette.concurrency import run_in_threadpool
 
-from alibabacloud_dingtalk.oauth2_1_0.client import Client as OAuth2Client
-from alibabacloud_dingtalk.oauth2_1_0 import models as oauth2_models
-from alibabacloud_tea_openapi import models as open_api_models
-
 from app.config import settings
 from app.services.client_registry import DingTalkApp
 
@@ -49,13 +45,24 @@ def _debug_dump_value(value: Any) -> Any:
         "accesstoken",
         "refresh_token",
         "refreshtoken",
+        "accessToken",
+        "accesstoken",
+        "refreshToken",
         "appsecret",
         "app_secret",
+        "appSecret",
         "client_secret",
+        "clientSecret",
+        "clientsecret",
         "secret",
         "token",
+        "code",
+        "authCode",
+        "authcode",
+        "state",
         "x-acs-dingtalk-access-token",
         "x_acs_dingtalk_access_token",
+        "xacsdingtalkaccesstoken",
     }
     profile_keys = {
         "address",
@@ -94,7 +101,8 @@ def _debug_dump_value(value: Any) -> Any:
         for key, item in value.items():
             key_text = str(key)
             normalized = key_text.lower().replace("-", "_")
-            if normalized in secret_keys or normalized in profile_keys:
+            compact = normalized.replace("_", "")
+            if normalized in secret_keys or compact in secret_keys or normalized in profile_keys or compact in profile_keys:
                 out[key_text] = "***REDACTED***"
             else:
                 out[key_text] = _debug_dump_value(item)
@@ -116,23 +124,24 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
     # 登录授权阶段只申请钉钉身份凭证所需范围；通讯录读取权限由应用后台权限控制。
     scope = "openid corpid"
 
+    endpoint = str(settings.dingtalk.auth_base_url).rstrip("/")
+    params = {
+        "client_id": app.app_key,
+        "redirect_uri": str(app.callback_url),
+        "response_type": "code",
+        "scope": scope,
+        "state": state,
+    }
     logger.debug(
-        "dingtalk_oauth_login_url_build app=%r scope=%s callback_url_configured=%s",
+        "dingtalk_oauth_login_url_build endpoint=%s app=%r params=%r",
+        endpoint,
         _app_debug_summary(app),
-        scope,
-        bool(app.callback_url),
+        params,
     )
 
-    query = urlencode(
-        {
-            "client_id": app.app_key,
-            "redirect_uri": str(app.callback_url),
-            "response_type": "code",
-            "scope": scope,
-            "state": state,
-        }
-    )
-    return f"{str(settings.dingtalk.auth_base_url).rstrip('/')}?{query}"
+    login_url = f"{endpoint}?{urlencode(params)}"
+    logger.debug("dingtalk_oauth_login_url_result endpoint=%s has_login_url=%s", endpoint, bool(login_url))
+    return login_url
 
 
 # ---------------------------------------------------------------------------
@@ -144,25 +153,49 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
 def _exchange_user_access_token(code: str, app: DingTalkApp) -> str:
     """
     通过授权 code 换取用户 AccessToken（UserAccessToken）。
-    使用官方 SDK，同步执行。
+    使用钉钉 REST API，同步执行。
     """
-    config = open_api_models.Config(protocol="https", region_id="central")
-    oauth_client = OAuth2Client(config)
-    token_request = oauth2_models.GetUserTokenRequest(
-        client_id=app.app_key,
-        client_secret=app.app_secret,
-        code=code,
-        grant_type="authorization_code",
-    )
+    endpoint = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken"
+    body = {
+        "clientId": app.app_key,
+        "clientSecret": app.app_secret,
+        "code": code,
+        "grantType": "authorization_code",
+    }
     try:
         logger.debug(
-            "dingtalk_user_token_request_start app=%r client_id=%s grant_type=authorization_code",
-            _app_debug_summary(app),
-            app.app_key,
+            "dingtalk_user_token_request endpoint=%s body=%r",
+            endpoint,
+            body,
         )
-        token_response = oauth_client.get_user_token(token_request)
-        logger.debug("dingtalk_user_token_raw body=%r", _debug_dump_value(token_response.body))
-        token = token_response.body.access_token
+        resp = httpx.post(endpoint, json=body, timeout=5.0)
+        logger.debug(
+            "dingtalk_user_token_response status_code=%s request_id=%s",
+            resp.status_code,
+            _request_id_from_headers(resp),
+        )
+        if resp.status_code >= 400:
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"body": (resp.text or "")[:500]}
+            logger.warning(
+                "dingtalk_user_token_failed status_code=%s code=%s message=%s requestid=%s",
+                resp.status_code,
+                err.get("code"),
+                err.get("message"),
+                err.get("requestid") or err.get("request_id"),
+                extra={"event": "dingtalk_user_token_failed"},
+            )
+            logger.debug("dingtalk_user_token_result ok=false body=%r", err)
+            resp.raise_for_status()
+
+        data = resp.json()
+        logger.debug("dingtalk_user_token_raw body=%r", data)
+        token = data.get("accessToken")
+        if not token:
+            logger.debug("dingtalk_user_token_result ok=false reason=missing_accessToken body=%r", data)
+            raise DingTalkAPIError("Failed to get userAccessToken: missing accessToken")
         logger.debug("dingtalk_user_token_result ok=true has_access_token=%s", bool(token))
         return token
     except Exception as e:
@@ -176,7 +209,9 @@ def _exchange_user_access_token(code: str, app: DingTalkApp) -> str:
             e,
             exc_info=True,
         )
-        raise DingTalkAPIError(f"SDK: Failed to get userAccessToken: {e}") from e
+        if isinstance(e, DingTalkAPIError):
+            raise
+        raise DingTalkAPIError(f"REST: Failed to get userAccessToken: {e}") from e
 
 
 def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str, Any]]:
@@ -185,10 +220,16 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
     返回原始字段字典；失败时返回 None。
     """
     try:
-        logger.debug("dingtalk_user_basic_request_start endpoint=/v1.0/contact/users/me")
+        endpoint = "https://api.dingtalk.com/v1.0/contact/users/me"
+        headers = {"x-acs-dingtalk-access-token": user_access_token}
+        logger.debug(
+            "dingtalk_user_basic_request endpoint=%s headers=%r",
+            endpoint,
+            headers,
+        )
         resp = httpx.get(
-            "https://api.dingtalk.com/v1.0/contact/users/me",
-            headers={"x-acs-dingtalk-access-token": user_access_token},
+            endpoint,
+            headers=headers,
             timeout=5.0,
         )
         logger.debug(
@@ -211,11 +252,11 @@ def _fetch_user_basic_info_via_rest(user_access_token: str) -> Optional[Dict[str
             )
             logger.debug(
                 "dingtalk_user_basic_result ok=false body=%r",
-                _debug_dump_value(err),
+                err,
             )
             resp.raise_for_status()
         data = resp.json()
-        logger.debug("dingtalk_user_basic_raw body=%r", _debug_dump_value(data))
+        logger.debug("dingtalk_user_basic_raw body=%r", data)
         result = {
             "openId": data.get("openId"),
             "name": data.get("nick"),

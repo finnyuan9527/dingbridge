@@ -124,10 +124,72 @@ def test_dingtalk_basic_http_failure_logs_response_details(monkeypatch):
 
     assert result is None
     logs = stream.getvalue()
-    assert "dingtalk_user_basic_request_start endpoint=/v1.0/contact/users/me" in logs
+    assert "dingtalk_user_basic_request endpoint=https://api.dingtalk.com/v1.0/contact/users/me headers=" in logs
     assert "dingtalk_user_basic_response status_code=403 request_id=header-req-1" in logs
     assert "dingtalk_user_basic_result ok=false body=" in logs
     assert "Forbidden.AccessDenied.AccessTokenPermissionDenied" in logs
+
+
+def test_dingtalk_user_access_token_uses_rest_api_and_logs_debug_payloads(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    app = SimpleNamespace(
+        id=1,
+        name="Default DingTalk App",
+        enabled=True,
+        is_default=True,
+        app_key="ding-app-key",
+        app_secret="secret-value",
+        callback_url="https://sso.example.com/dingtalk/callback",
+    )
+    captured = {}
+
+    def fake_post(url, *, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["timeout"] = timeout
+        request = dingtalk_adapter.httpx.Request("POST", url)
+        return dingtalk_adapter.httpx.Response(
+            200,
+            json={"accessToken": "user-token", "refreshToken": "refresh-token", "expireIn": 7200},
+            request=request,
+            headers={"x-acs-request-id": "req-token-1"},
+        )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "post", fake_post)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    target_logger = logging.getLogger("dingbridge.dingtalk")
+    previous_level = target_logger.level
+    previous_disabled = target_logger.disabled
+    target_logger.disabled = False
+    target_logger.setLevel(logging.DEBUG)
+    target_logger.addHandler(handler)
+    try:
+        token = dingtalk_adapter._exchange_user_access_token("auth-code", app)
+    finally:
+        target_logger.removeHandler(handler)
+        target_logger.setLevel(previous_level)
+        target_logger.disabled = previous_disabled
+
+    assert token == "user-token"
+    assert captured == {
+        "url": "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
+        "json": {
+            "clientId": "ding-app-key",
+            "clientSecret": "secret-value",
+            "code": "auth-code",
+            "grantType": "authorization_code",
+        },
+        "timeout": 5.0,
+    }
+    logs = stream.getvalue()
+    assert "dingtalk_user_token_request endpoint=https://api.dingtalk.com/v1.0/oauth2/userAccessToken body=" in logs
+    assert "dingtalk_user_token_response status_code=200 request_id=req-token-1" in logs
+    assert "secret-value" in logs
+    assert "auth-code" in logs
+    assert "user-token" in logs
+    assert "refresh-token" in logs
 
 
 def test_dingtalk_basic_rest_maps_contact_profile_fields(monkeypatch):
@@ -160,6 +222,47 @@ def test_dingtalk_basic_rest_maps_contact_profile_fields(monkeypatch):
     }
 
 
+def test_dingtalk_basic_rest_logs_debug_payloads(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    request = dingtalk_adapter.httpx.Request("GET", "https://api.dingtalk.com/v1.0/contact/users/me")
+    response = dingtalk_adapter.httpx.Response(
+        200,
+        json={
+            "openId": "open-1",
+            "nick": "Alice",
+            "email": "alice@example.com",
+            "mobile": "+8613000000000",
+        },
+        request=request,
+        headers={"x-acs-request-id": "req-user-1"},
+    )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "get", lambda *args, **kwargs: response)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    target_logger = logging.getLogger("dingbridge.dingtalk")
+    previous_level = target_logger.level
+    previous_disabled = target_logger.disabled
+    target_logger.disabled = False
+    target_logger.setLevel(logging.DEBUG)
+    target_logger.addHandler(handler)
+    try:
+        result = dingtalk_adapter._fetch_user_basic_info_via_rest("user-token")
+    finally:
+        target_logger.removeHandler(handler)
+        target_logger.setLevel(previous_level)
+        target_logger.disabled = previous_disabled
+
+    assert result["email"] == "alice@example.com"
+    logs = stream.getvalue()
+    assert "dingtalk_user_basic_request endpoint=https://api.dingtalk.com/v1.0/contact/users/me headers=" in logs
+    assert "user-token" in logs
+    assert "dingtalk_user_basic_response status_code=200 request_id=req-user-1" in logs
+    assert "alice@example.com" in logs
+    assert "+8613000000000" in logs
+
+
 def test_dingtalk_adapter_no_longer_exposes_oapi_unionid_enrichment():
     dingtalk_adapter = _load_real_dingtalk_adapter()
 
@@ -174,7 +277,10 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     dump = dingtalk_adapter._debug_dump_value(
         {
             "access_token": "secret-token",
+            "accessToken": "secret-access-camel",
             "refreshToken": "secret-refresh",
+            "clientSecret": "secret-client-camel",
+            "code": "auth-code",
             "userid": "user-1",
             "email": "alice@example.com",
             "orgEmail": "alice@corp.example.com",
@@ -187,7 +293,10 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     )
 
     assert dump["access_token"] == "***REDACTED***"
+    assert dump["accessToken"] == "***REDACTED***"
     assert dump["refreshToken"] == "***REDACTED***"
+    assert dump["clientSecret"] == "***REDACTED***"
+    assert dump["code"] == "***REDACTED***"
     assert dump["nested"][0]["client_secret"] == "***REDACTED***"
     assert dump["userid"] == "user-1"
     assert dump["email"] == "***REDACTED***"
