@@ -24,7 +24,6 @@ class DingTalkApp(BaseModel):
     app_key: str
     app_secret: str
     callback_url: AnyHttpUrl
-    fetch_user_details: bool = True
 
 
 def seed_defaults_if_needed() -> None:
@@ -51,7 +50,6 @@ def seed_defaults_if_needed() -> None:
                 app_key=settings.dingtalk.app_key,
                 app_secret=settings.dingtalk.app_secret,
                 callback_url=str(settings.dingtalk.callback_url),
-                fetch_user_details=settings.dingtalk.fetch_user_details,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
@@ -105,7 +103,6 @@ def load_dingtalk_apps() -> Dict[int, DingTalkApp]:
                 app_key=a.app_key,
                 app_secret=a.app_secret,
                 callback_url=a.callback_url,
-                fetch_user_details=a.fetch_user_details,
             )
         return out
 

@@ -37,7 +37,6 @@ class DingTalkApp(BaseModel):
     app_key: str
     app_secret: str
     callback_url: AnyHttpUrl
-    fetch_user_details: bool = True
 
 
 def _dingtalk_app_debug(app: DingTalkApp) -> dict:
@@ -48,7 +47,6 @@ def _dingtalk_app_debug(app: DingTalkApp) -> dict:
         "is_default": app.is_default,
         "app_key": app.app_key,
         "callback_url": str(app.callback_url),
-        "fetch_user_details": app.fetch_user_details,
     }
 
 
@@ -103,7 +101,6 @@ class ClientRegistry:
                 app_key=settings.dingtalk.app_key,
                 app_secret=settings.dingtalk.app_secret,
                 callback_url=settings.dingtalk.callback_url,
-                fetch_user_details=settings.dingtalk.fetch_user_details,
             )
             default_dingtalk_app_id = 0
 
@@ -258,7 +255,6 @@ class ClientRegistry:
                 app_key=settings.dingtalk.app_key,
                 app_secret=settings.dingtalk.app_secret,
                 callback_url=settings.dingtalk.callback_url,
-                fetch_user_details=settings.dingtalk.fetch_user_details,
             )
             logger.debug("dingtalk_app_select client_id=%s source=settings_fallback app=%r", client_id, _dingtalk_app_debug(app))
             return app

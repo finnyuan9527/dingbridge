@@ -44,7 +44,6 @@ def upgrade() -> None:
             sa.Column("app_key", sa.String(length=200), nullable=False),
             sa.Column("app_secret", sa.Text(), nullable=False),
             sa.Column("callback_url", sa.String(length=500), nullable=False),
-            sa.Column("fetch_user_details", sa.Boolean(), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
             sa.PrimaryKeyConstraint("id"),

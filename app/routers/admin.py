@@ -113,7 +113,6 @@ class DingTalkAppUpsert(BaseModel):
     app_key: str
     app_secret: Optional[str] = None
     callback_url: AnyHttpUrl
-    fetch_user_details: bool = True
 
 
 class DingTalkAppOut(BaseModel):
@@ -123,7 +122,6 @@ class DingTalkAppOut(BaseModel):
     is_default: bool
     app_key: str
     callback_url: AnyHttpUrl
-    fetch_user_details: bool
 
 
 def _list_dingtalk_apps_sync():
@@ -137,7 +135,6 @@ def _list_dingtalk_apps_sync():
                 is_default=r.is_default,
                 app_key=r.app_key,
                 callback_url=r.callback_url,
-                fetch_user_details=r.fetch_user_details,
             )
             for r in rows
         ]
@@ -162,7 +159,6 @@ def _upsert_dingtalk_app_sync(payload: DingTalkAppUpsert):
                 app_key=payload.app_key,
                 app_secret=payload.app_secret,
                 callback_url=str(payload.callback_url),
-                fetch_user_details=payload.fetch_user_details,
             )
             db.add(row)
             db.flush()
@@ -172,7 +168,6 @@ def _upsert_dingtalk_app_sync(payload: DingTalkAppUpsert):
             row.is_default = payload.is_default
             row.app_key = payload.app_key
             row.callback_url = str(payload.callback_url)
-            row.fetch_user_details = payload.fetch_user_details
             if payload.app_secret is not None:
                 row.app_secret = payload.app_secret
 
@@ -184,7 +179,6 @@ def _upsert_dingtalk_app_sync(payload: DingTalkAppUpsert):
         is_default=row.is_default,
         app_key=row.app_key,
         callback_url=row.callback_url,
-        fetch_user_details=row.fetch_user_details,
     )
 
 

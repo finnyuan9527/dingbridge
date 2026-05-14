@@ -26,14 +26,12 @@ def _app_debug_summary(app: client_registry.DingTalkApp) -> dict:
         "is_default": app.is_default,
         "app_key": app.app_key,
         "callback_url": str(app.callback_url),
-        "fetch_user_details": app.fetch_user_details,
     }
 
 
 def _dingtalk_data_summary(data: dict) -> dict:
     return {
         "has_userId": bool(data.get("userId") or data.get("userid")),
-        "has_unionId": bool(data.get("unionId") or data.get("unionid")),
         "has_name": bool(data.get("name")),
         "has_email": bool(data.get("email")),
         "has_mobile": bool(data.get("mobile")),

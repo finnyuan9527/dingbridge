@@ -30,8 +30,16 @@ def test_removed_protocol_settings_are_not_exposed():
 
 def test_dingtalk_settings_expose_only_used_endpoint_overrides():
     assert "auth_base_url" in DingTalkSettings.model_fields
-    assert "token_base_url" in DingTalkSettings.model_fields
+    assert "token_base_url" not in DingTalkSettings.model_fields
     assert "user_info_url" not in DingTalkSettings.model_fields
+    assert "fetch_user_details" not in DingTalkSettings.model_fields
+
+
+def test_admin_dingtalk_app_schema_does_not_expose_fetch_user_details():
+    from app.routers.admin import DingTalkAppOut, DingTalkAppUpsert
+
+    assert "fetch_user_details" not in DingTalkAppUpsert.model_fields
+    assert "fetch_user_details" not in DingTalkAppOut.model_fields
 
 
 def test_compose_publishes_redis_to_loopback_only():
@@ -122,6 +130,44 @@ def test_dingtalk_basic_http_failure_logs_response_details(monkeypatch):
     assert "Forbidden.AccessDenied.AccessTokenPermissionDenied" in logs
 
 
+def test_dingtalk_basic_rest_maps_contact_profile_fields(monkeypatch):
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+    request = dingtalk_adapter.httpx.Request("GET", "https://api.dingtalk.com/v1.0/contact/users/me")
+    response = dingtalk_adapter.httpx.Response(
+        200,
+        json={
+            "openId": "open-1",
+            "nick": "Alice",
+            "email": "alice@example.com",
+            "mobile": "+8613000000000",
+            "avatarUrl": "https://example.com/a.png",
+            "stateCode": "86",
+        },
+        request=request,
+    )
+
+    monkeypatch.setattr(dingtalk_adapter.httpx, "get", lambda *args, **kwargs: response)
+
+    result = dingtalk_adapter._fetch_user_basic_info_via_rest("user-token")
+
+    assert result == {
+        "openId": "open-1",
+        "name": "Alice",
+        "email": "alice@example.com",
+        "mobile": "+8613000000000",
+        "avatar": "https://example.com/a.png",
+        "state_code": "86",
+    }
+
+
+def test_dingtalk_adapter_no_longer_exposes_oapi_unionid_enrichment():
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+
+    assert not hasattr(dingtalk_adapter, "_enrich_with_oapi")
+    assert not hasattr(dingtalk_adapter, "_get_userid_by_unionid_sync")
+    assert not hasattr(dingtalk_adapter, "_get_user_detail_by_userid_sync")
+
+
 def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     dingtalk_adapter = _load_real_dingtalk_adapter()
 
@@ -130,7 +176,6 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
             "access_token": "secret-token",
             "refreshToken": "secret-refresh",
             "userid": "user-1",
-            "unionid": "union-1",
             "email": "alice@example.com",
             "orgEmail": "alice@corp.example.com",
             "mobile": "+8613000000000",
@@ -145,7 +190,6 @@ def test_dingtalk_debug_dump_redacts_tokens_and_profile_fields():
     assert dump["refreshToken"] == "***REDACTED***"
     assert dump["nested"][0]["client_secret"] == "***REDACTED***"
     assert dump["userid"] == "user-1"
-    assert dump["unionid"] == "union-1"
     assert dump["email"] == "***REDACTED***"
     assert dump["orgEmail"] == "***REDACTED***"
     assert dump["mobile"] == "***REDACTED***"
@@ -164,7 +208,6 @@ def test_dingtalk_oauth_scope_uses_login_identity_scopes_only():
         is_default=True,
         app_key="ding-app-key",
         callback_url="https://sso.example.com/dingtalk/callback",
-        fetch_user_details=False,
     )
 
     url = dingtalk_adapter.build_oauth_login_url(state="state-1", app=app)
@@ -173,30 +216,42 @@ def test_dingtalk_oauth_scope_uses_login_identity_scopes_only():
     assert query["scope"] == ["openid corpid"]
 
 
-def test_dingtalk_user_info_still_enriches_when_detail_fetch_disabled(monkeypatch):
+def test_dingtalk_user_info_uses_contact_profile_without_oapi_enrichment(monkeypatch):
     dingtalk_adapter = _load_real_dingtalk_adapter()
-    app = SimpleNamespace(fetch_user_details=False)
-
-    def fail_if_sdk_detail_is_called(*args, **kwargs):
-        raise AssertionError("SDK detail lookup should be skipped")
+    app = SimpleNamespace()
 
     monkeypatch.setattr(dingtalk_adapter, "_exchange_user_access_token", lambda code, app: "user-token")
-    monkeypatch.setattr(dingtalk_adapter, "_fetch_user_detail_via_sdk", fail_if_sdk_detail_is_called)
     monkeypatch.setattr(
         dingtalk_adapter,
         "_fetch_user_basic_info_via_rest",
-        lambda token: {"openId": "open-1", "unionid": "union-1", "name": "Alice"},
-    )
-    monkeypatch.setattr(
-        dingtalk_adapter,
-        "_enrich_with_oapi",
-        lambda result, union_id, app: {**result, "userid": "user-1", "org_email": "alice@example.com"},
+        lambda token: {"openId": "open-1", "name": "Alice", "email": "alice@example.com"},
     )
 
     result = dingtalk_adapter._get_user_info_sync("auth-code", app)
 
-    assert result["unionid"] == "union-1"
-    assert result["org_email"] == "alice@example.com"
+    assert result["openId"] == "open-1"
+    assert result["email"] == "alice@example.com"
+    assert "userid" not in result
+    assert "org_email" not in result
+    assert "unionid" not in result
+
+
+def test_dingtalk_normalized_user_does_not_alias_openid_as_userid():
+    dingtalk_adapter = _load_real_dingtalk_adapter()
+
+    result = dingtalk_adapter._normalize_dingtalk_user(
+        {
+            "openId": "open-1",
+            "name": "Alice",
+            "email": "alice@example.com",
+        }
+    )
+
+    assert result["userId"] == "open-1"
+    assert "unionId" not in result
+    assert "unionid" not in result
+    assert "userid" not in result
+    assert result["email"] == "alice@example.com"
 
 
 def test_dingtalk_callback_orchestrator_logs_each_success_boundary(monkeypatch):
@@ -209,7 +264,6 @@ def test_dingtalk_callback_orchestrator_logs_each_success_boundary(monkeypatch):
         is_default=False,
         app_key="ding-app-key",
         callback_url="https://sso.example.com/dingtalk/callback",
-        fetch_user_details=True,
     )
 
     async def fetch_normalized_user_info(code, selected_app):
@@ -217,7 +271,6 @@ def test_dingtalk_callback_orchestrator_logs_each_success_boundary(monkeypatch):
         assert selected_app is app
         return {
             "userId": "user-1",
-            "unionId": "union-1",
             "name": "Alice",
             "email": "alice@example.com",
             "deptIds": [1],
@@ -246,11 +299,11 @@ def test_dingtalk_callback_orchestrator_logs_each_success_boundary(monkeypatch):
         target_logger.setLevel(previous_level)
         target_logger.disabled = previous_disabled
 
-    assert user.subject == "union-1"
+    assert user.subject == "user-1"
     assert user.email == "alice@example.com"
     logs = stream.getvalue()
     assert "dingtalk_callback_orchestrator_start client_id=openchat-client-id" in logs
     assert "dingtalk_callback_orchestrator_app_selected client_id=openchat-client-id" in logs
     assert "dingtalk_callback_orchestrator_userinfo_success client_id=openchat-client-id" in logs
-    assert "dingtalk_identity_mapping_result subject=union-1" in logs
+    assert "dingtalk_identity_mapping_result subject=user-1" in logs
     assert "dingtalk_callback_orchestrator_mapping_success client_id=openchat-client-id" in logs

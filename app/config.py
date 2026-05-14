@@ -7,15 +7,9 @@ class DingTalkSettings(BaseSettings):
     app_secret: str = ""
     # 钉钉 OAuth2 授权地址 (固定)
     auth_base_url: AnyHttpUrl = "https://login.dingtalk.com/oauth2/auth"
-    # 钉钉 AccessToken 获取接口 (固定)
-    token_base_url: AnyHttpUrl = "https://oapi.dingtalk.com/gettoken"
     # 钉钉回调地址：需与钉钉开发者后台配置的一致
     # 格式：http(s)://{你的 dingbridge 域名}/dingtalk/callback
     callback_url: AnyHttpUrl = "http://localhost:8000/dingtalk/callback"
-    
-    # 是否获取用户详细信息（如手机号、邮箱、部门等）
-    # 注意：如果开启此项，必须在钉钉开发者后台开通 "通讯录个人信息读权限" (Contact.User.Read)
-    fetch_user_details: bool = True
 
 
 class OIDCSettings(BaseSettings):

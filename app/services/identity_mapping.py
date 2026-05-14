@@ -11,8 +11,8 @@ def map_dingtalk_to_user(dingtalk_data: dict) -> User:
     """
     将钉钉用户信息映射到统一的 User 模型。
     """
-    # 优先使用 unionId 作为唯一标识，其次是 userid
-    subject = dingtalk_data.get("unionId") or dingtalk_data.get("userid") or "unknown"
+    # 主链路以 /v1.0/contact/users/me 返回的 openId 作为 OIDC subject。
+    subject = dingtalk_data.get("userId") or dingtalk_data.get("openId") or "unknown"
     name = dingtalk_data.get("name") or "Unknown User"
     email = dingtalk_data.get("email")
     phone = dingtalk_data.get("mobile")
@@ -40,14 +40,13 @@ def map_dingtalk_to_user(dingtalk_data: dict) -> User:
         raw=dingtalk_data,
     )
     logger.debug(
-        "dingtalk_identity_mapping_result subject=%s has_name=%s has_email=%s has_phone=%s group_count=%s raw_has_userid=%s raw_has_unionid=%s",
+        "dingtalk_identity_mapping_result subject=%s has_name=%s has_email=%s has_phone=%s group_count=%s raw_has_userId=%s",
         user.subject,
         bool(user.name),
         bool(user.email),
         bool(user.phone_number),
         len(user.groups),
-        bool(dingtalk_data.get("userid") or dingtalk_data.get("userId")),
-        bool(dingtalk_data.get("unionid") or dingtalk_data.get("unionId")),
+        bool(dingtalk_data.get("userId") or dingtalk_data.get("openId")),
     )
     return user
 

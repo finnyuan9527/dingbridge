@@ -34,7 +34,6 @@ class DingTalkAppORM(Base):
     app_key: Mapped[str] = mapped_column(String(200), nullable=False)
     app_secret: Mapped[str] = mapped_column(Text, nullable=False)
     callback_url: Mapped[str] = mapped_column(String(500), nullable=False)
-    fetch_user_details: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
