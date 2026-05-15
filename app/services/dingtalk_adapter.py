@@ -128,6 +128,7 @@ def build_oauth_login_url(*, state: str, app: DingTalkApp) -> str:
         "response_type": "code",
         "scope": "openid corpid",
         "state": state,
+        "prompt":"consent"
     }
     logger.debug(
         "dingtalk_oauth_login_url_build endpoint=%s app=%r params=%r",
